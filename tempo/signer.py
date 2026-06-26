@@ -78,7 +78,7 @@ def recover_address(message_hash: bytes, sig: Signature) -> Address:
     v_bytes = bytes([sig.v])
 
     sig_bytes = r_bytes + s_bytes + v_bytes
-    recovered = Account._recover_hash(message_hash, sig_bytes)
+    recovered = Account._recover_hash(message_hash, signature=sig_bytes)
     return Address(to_bytes(hexstr=recovered))
 
 

@@ -1,7 +1,7 @@
 [project]
 name = "tempo-py"
 version = "0.1.0"
-description = "Tempo blockchain Python SDK — pure functions + data models on web3.py"
+description = "Tempo blockchain Python SDK, based on web3.py and eth-contract"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -11,4 +11,9 @@ dependencies = [
     "web3>=7.0.0",
     "attrs>=24.0.0",
     "eth-contract>=0.4.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
 ]
