@@ -250,8 +250,10 @@ class TestAccountKeychainWrapper:
 
 class TestContractConsistency:
     def test_tip20_selector_consistency(self):
-        from tempo.transaction import TIP20_TRANSFER_SELECTOR
-        assert bytes(TIP20_CONTRACT.fns.transfer.selector) == TIP20_TRANSFER_SELECTOR
+        # TIP20_CONTRACT selectors match what keychain uses
+        from tempo.keychain import CallScope
+        cs = CallScope.transfer("0x" + "20" * 20)
+        assert cs.selector == bytes(TIP20_CONTRACT.fns.transfer.selector)
 
     def test_instance_sharing(self):
         from tempo.contracts.tip20 import TIP20_CONTRACT as C1

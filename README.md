@@ -9,14 +9,15 @@ Pure functions + data model classes, provider-agnostic calldata building.
 ```python
 from tempo import TempoTransaction, Call, Signer, Builder
 from tempo.constants import CHAIN_ID_MODERATO, ALPHA_USD
-from tempo.transaction import sign_transaction, serialize, encode_tip20_transfer
+from tempo.transaction import sign_transaction, serialize
+from tempo.contracts import TIP20_CONTRACT
 
 # Build a transaction
 tx = TempoTransaction.create(
     chain_id=CHAIN_ID_MODERATO,
     gas_limit=100_000,
     max_fee_per_gas=2_000_000_000,
-    calls=(Call.create(to=ALPHA_USD, data=encode_tip20_transfer(to, amount)),),
+    calls=(Call.create(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(to, amount).data),),
 )
 
 # Sign and serialize

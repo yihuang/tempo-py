@@ -15,6 +15,7 @@ from eth_utils import keccak, to_bytes
 from .models import SECP256K1_HALF_N, SECP256K1_N, Signature, TempoTransaction
 from .signer import Signer
 from .transaction import get_sign_payload, serialize_for_signing
+from .contracts.tip20 import TIP20_CONTRACT
 from .types import (
     Address,
     BytesLike,
@@ -25,7 +26,6 @@ from .types import (
     to_checksum_str,
     validate_nonempty_address,
 )
-from .transaction import TIP20_TRANSFER_SELECTOR, TIP20_APPROVE_SELECTOR
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -164,7 +164,7 @@ class CallScope:
         """Allow ``transfer(address,uint256)`` on *token*."""
         return cls(
             target=token,
-            selector=TIP20_TRANSFER_SELECTOR,
+            selector=TIP20_CONTRACT.fns.transfer.selector,
             selector_rules=(),
         )
 
@@ -173,7 +173,7 @@ class CallScope:
         """Allow ``approve(address,uint256)`` on *token*."""
         return cls(
             target=token,
-            selector=TIP20_APPROVE_SELECTOR,
+            selector=TIP20_CONTRACT.fns.approve.selector,
             selector_rules=(),
         )
 

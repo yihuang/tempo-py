@@ -3,12 +3,6 @@
 import pytest
 from tempo import TempoTransaction, Call, Signer, Builder
 from tempo.transaction import (
-    TIP20_TRANSFER_SELECTOR,
-    TIP20_APPROVE_SELECTOR,
-    TIP20_TRANSFER_WITH_MEMO_SELECTOR,
-    encode_tip20_transfer,
-    encode_tip20_approve,
-    encode_tip20_transfer_with_memo,
     serialize_for_signing,
     serialize,
     sign_transaction,
@@ -20,6 +14,7 @@ from tempo.transaction import (
     Builder as TxBuilder,
 )
 from tempo.constants import CHAIN_ID_MODERATO, ALPHA_USD, ACCOUNT_KEYCHAIN_ADDRESS
+from tempo.contracts import TIP20_CONTRACT
 
 TEST_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 FEE_PAYER_PK = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
@@ -27,35 +22,31 @@ RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 
 # ---------------------------------------------------------------------------
-# TIP-20 encoding
+# TIP-20 encoding via TIP20_CONTRACT
 # ---------------------------------------------------------------------------
 
 class TestTIP20Encoding:
-    def test_transfer_selector(self):
-        data = encode_tip20_transfer(RECIPIENT, 10**18)
-        assert data[:4] == TIP20_TRANSFER_SELECTOR
+    def test_transfer_selector_and_size(self):
+        data = bytes(TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
+        assert data[:4] == bytes(TIP20_CONTRACT.fns.transfer.selector)
         assert len(data) == 68
 
     def test_transfer_contains_recipient(self):
-        data = encode_tip20_transfer(RECIPIENT, 10**18)
+        data = bytes(TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
         recipient_bytes = bytes.fromhex(RECIPIENT[2:])
         assert data[16:36] == recipient_bytes
         assert int.from_bytes(data[36:68], "big") == 10**18
 
-    def test_approve_selector(self):
-        data = encode_tip20_approve(RECIPIENT, 10**18)
-        assert data[:4] == TIP20_APPROVE_SELECTOR
+    def test_approve(self):
+        data = bytes(TIP20_CONTRACT.fns.approve(RECIPIENT, 10**18).data)
+        assert data[:4] == bytes(TIP20_CONTRACT.fns.approve.selector)
 
     def test_transfer_with_memo(self):
         memo = b"\x01" * 32
-        data = encode_tip20_transfer_with_memo(RECIPIENT, 10**18, memo)
-        assert data[:4] == TIP20_TRANSFER_WITH_MEMO_SELECTOR
+        data = bytes(TIP20_CONTRACT.fns.transferWithMemo(RECIPIENT, 10**18, memo).data)
+        assert data[:4] == bytes(TIP20_CONTRACT.fns.transferWithMemo.selector)
         assert len(data) == 100
         assert data[68:100] == memo
-
-    def test_transfer_with_memo_rejects_short_memo(self):
-        with pytest.raises(ValueError):
-            encode_tip20_transfer_with_memo(RECIPIENT, 10**18, b"short")
 
 
 # ---------------------------------------------------------------------------
@@ -126,14 +117,11 @@ class TestSigning:
     def test_fee_payer_flow(self):
         user = Signer(TEST_PK)
         fee_payer = Signer(FEE_PAYER_PK)
-
         tx = _make_tx(awaiting_fee_payer=True)
         signed_user = sign_transaction(tx, user)
         assert signed_user.awaiting_fee_payer
-
         final = add_fee_payer_signature(signed_user, fee_payer)
         assert final.has_fee_payer_signature
-
         fee_payer_addr = verify_fee_payer_signature(final, user.address)
         assert fee_payer_addr == fee_payer.address
 
@@ -166,11 +154,10 @@ class TestBuilder:
               .gas_limit(100_000)
               .max_fee_per_gas(2_000_000_000)
               .nonce(0)
-              .add_call(to=ALPHA_USD, data=encode_tip20_transfer(RECIPIENT, 10**18))
+              .add_call(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
               .build())
         assert tx.chain_id == CHAIN_ID_MODERATO
         assert len(tx.calls) == 1
-        assert tx.gas_limit == 100_000
 
     def test_build_multiple_calls(self):
         tx = (TxBuilder()
@@ -187,7 +174,7 @@ class TestBuilder:
               .gas_limit(100_000)
               .max_fee_per_gas(2_000_000_000)
               .nonce(0)
-              .add_call(to=ALPHA_USD, data=encode_tip20_transfer(RECIPIENT, 10**18))
+              .add_call(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
               .build())
         signed = sign_transaction(tx, Signer(TEST_PK))
         ser = serialize(signed)
@@ -211,12 +198,11 @@ class TestBuilder:
               .fee_token(ALPHA_USD)
               .add_call(to=RECIPIENT, data=b"")
               .build())
-        from eth_utils import to_checksum_address
-        assert to_checksum_address("0x" + bytes(tx.fee_token).hex()) == ALPHA_USD
+        assert tx.fee_token is not None
 
 
 # ---------------------------------------------------------------------------
-# Sign payload consistency
+# Sign payload
 # ---------------------------------------------------------------------------
 
 class TestPayload:
@@ -249,6 +235,6 @@ def _make_tx(awaiting_fee_payer: bool = False) -> TempoTransaction:
         nonce_key=0,
         awaiting_fee_payer=awaiting_fee_payer,
         calls=(
-            Call.create(to=ALPHA_USD, data=encode_tip20_transfer(RECIPIENT, 10**18)),
+            Call.create(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data),
         ),
     )

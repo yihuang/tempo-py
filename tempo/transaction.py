@@ -14,50 +14,11 @@ from .types import Address, BytesLike, as_address, as_bytes, as_optional_address
 from .contracts.tip20 import TIP20_CONTRACT
 
 # ---------------------------------------------------------------------------
-# TIP-20 selectors and topics
+# TIP-20 event topics
 # ---------------------------------------------------------------------------
 
-# Derived from the canonical TIP20_CONTRACT definition — single source of truth
-TIP20_TRANSFER_SELECTOR = bytes(TIP20_CONTRACT.fns.transfer.selector)
-TIP20_APPROVE_SELECTOR = bytes(TIP20_CONTRACT.fns.approve.selector)
-TIP20_TRANSFER_WITH_MEMO_SELECTOR = bytes(TIP20_CONTRACT.fns.transferWithMemo.selector)
 TIP20_TRANSFER_TOPIC = keccak(b"Transfer(address,address,uint256)")
 TIP20_TRANSFER_WITH_MEMO_TOPIC = keccak(b"TransferWithMemo(address,address,uint256,bytes32)")
-
-
-def encode_tip20_transfer(recipient: BytesLike, amount: int) -> bytes:
-    """Encode TIP-20 ``transfer(address,uint256)`` calldata."""
-    to_addr = as_address(recipient)
-    data = bytearray(68)
-    data[0:4] = TIP20_TRANSFER_SELECTOR
-    data[16:36] = bytes(to_addr)
-    data[36:68] = amount.to_bytes(32, "big")
-    return bytes(data)
-
-
-def encode_tip20_approve(spender: BytesLike, amount: int) -> bytes:
-    """Encode TIP-20 ``approve(address,uint256)`` calldata."""
-    spender_addr = as_address(spender)
-    data = bytearray(68)
-    data[0:4] = TIP20_APPROVE_SELECTOR
-    data[16:36] = bytes(spender_addr)
-    data[36:68] = amount.to_bytes(32, "big")
-    return bytes(data)
-
-
-def encode_tip20_transfer_with_memo(
-    recipient: BytesLike, amount: int, memo: bytes
-) -> bytes:
-    """Encode TIP-20 ``transferWithMemo(address,uint256,bytes32)`` calldata."""
-    if len(memo) != 32:
-        raise ValueError("memo must be exactly 32 bytes")
-    to_addr = as_address(recipient)
-    data = bytearray(100)
-    data[0:4] = TIP20_TRANSFER_WITH_MEMO_SELECTOR
-    data[16:36] = bytes(to_addr)
-    data[36:68] = amount.to_bytes(32, "big")
-    data[68:100] = memo
-    return bytes(data)
 
 
 def parse_topic_address(topic: str) -> Address:

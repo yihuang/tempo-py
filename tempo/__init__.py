@@ -52,9 +52,6 @@ from .signer import Signer, recover_address, verify_signature
 from .transaction import (
     Builder,
     add_fee_payer_signature,
-    encode_tip20_approve,
-    encode_tip20_transfer,
-    encode_tip20_transfer_with_memo,
     get_fee_payer_sign_payload,
     get_sign_payload,
     serialize,
@@ -109,9 +106,6 @@ __all__ = [
     "add_fee_payer_signature",
     "get_sign_payload",
     "get_fee_payer_sign_payload",
-    "encode_tip20_transfer",
-    "encode_tip20_approve",
-    "encode_tip20_transfer_with_memo",
     "verify_tx_signature",
     "verify_fee_payer_signature",
     # Client
