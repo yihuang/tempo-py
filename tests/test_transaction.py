@@ -14,7 +14,7 @@ from tempo.transaction import (
     Builder as TxBuilder,
 )
 from tempo.constants import CHAIN_ID_MODERATO, ALPHA_USD, ACCOUNT_KEYCHAIN_ADDRESS
-from tempo.contracts import TIP20_CONTRACT
+from tempo.contracts import TIP20
 
 TEST_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 FEE_PAYER_PK = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
@@ -27,24 +27,24 @@ RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 class TestTIP20Encoding:
     def test_transfer_selector_and_size(self):
-        data = bytes(TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
-        assert data[:4] == bytes(TIP20_CONTRACT.fns.transfer.selector)
+        data = bytes(TIP20.fns.transfer(RECIPIENT, 10**18).data)
+        assert data[:4] == bytes(TIP20.fns.transfer.selector)
         assert len(data) == 68
 
     def test_transfer_contains_recipient(self):
-        data = bytes(TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
+        data = bytes(TIP20.fns.transfer(RECIPIENT, 10**18).data)
         recipient_bytes = bytes.fromhex(RECIPIENT[2:])
         assert data[16:36] == recipient_bytes
         assert int.from_bytes(data[36:68], "big") == 10**18
 
     def test_approve(self):
-        data = bytes(TIP20_CONTRACT.fns.approve(RECIPIENT, 10**18).data)
-        assert data[:4] == bytes(TIP20_CONTRACT.fns.approve.selector)
+        data = bytes(TIP20.fns.approve(RECIPIENT, 10**18).data)
+        assert data[:4] == bytes(TIP20.fns.approve.selector)
 
     def test_transfer_with_memo(self):
         memo = b"\x01" * 32
-        data = bytes(TIP20_CONTRACT.fns.transferWithMemo(RECIPIENT, 10**18, memo).data)
-        assert data[:4] == bytes(TIP20_CONTRACT.fns.transferWithMemo.selector)
+        data = bytes(TIP20.fns.transferWithMemo(RECIPIENT, 10**18, memo).data)
+        assert data[:4] == bytes(TIP20.fns.transferWithMemo.selector)
         assert len(data) == 100
         assert data[68:100] == memo
 
@@ -154,7 +154,7 @@ class TestBuilder:
               .gas_limit(100_000)
               .max_fee_per_gas(2_000_000_000)
               .nonce(0)
-              .add_call(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
+              .add_call(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data)
               .build())
         assert tx.chain_id == CHAIN_ID_MODERATO
         assert len(tx.calls) == 1
@@ -174,7 +174,7 @@ class TestBuilder:
               .gas_limit(100_000)
               .max_fee_per_gas(2_000_000_000)
               .nonce(0)
-              .add_call(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data)
+              .add_call(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data)
               .build())
         signed = sign_transaction(tx, Signer(TEST_PK))
         ser = serialize(signed)
@@ -235,6 +235,6 @@ def _make_tx(awaiting_fee_payer: bool = False) -> TempoTransaction:
         nonce_key=0,
         awaiting_fee_payer=awaiting_fee_payer,
         calls=(
-            Call.create(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(RECIPIENT, 10**18).data),
+            Call.create(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data),
         ),
     )

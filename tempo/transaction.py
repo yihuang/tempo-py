@@ -11,14 +11,8 @@ from .constants import DEFAULT_CHAIN_ID, DEFAULT_NONCE_KEY
 from .models import Call, Signature, TempoTransaction
 from .signer import Signer
 from .types import Address, BytesLike, as_address, as_bytes, as_optional_address
-from .contracts.tip20 import TIP20_CONTRACT
+from .contracts.tip20 import TIP20
 
-# ---------------------------------------------------------------------------
-# TIP-20 event topics
-# ---------------------------------------------------------------------------
-
-TIP20_TRANSFER_TOPIC = keccak(b"Transfer(address,address,uint256)")
-TIP20_TRANSFER_WITH_MEMO_TOPIC = keccak(b"TransferWithMemo(address,address,uint256,bytes32)")
 
 
 def parse_topic_address(topic: str) -> Address:

@@ -17,7 +17,7 @@ from .addresses import ACCOUNT_KEYCHAIN_ADDRESS
 # ---------------------------------------------------------------------------
 # Global Contract instance — shared, reusable, public
 # ---------------------------------------------------------------------------
-ACCOUNT_KEYCHAIN_CONTRACT = Contract.from_abi([
+ACCOUNT_KEYCHAIN = Contract.from_abi([
     """struct TokenLimit {
         address token;
         uint256 amount;
@@ -124,7 +124,7 @@ class AccountKeychain:
             allow_any_calls=allow_any_calls,
             allowed_calls=allowed_calls,
         )
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.authorizeKey(key_id, signature_type, restrictions).data
+        data = ACCOUNT_KEYCHAIN.fns.authorizeKey(key_id, signature_type, restrictions).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
@@ -152,19 +152,19 @@ class AccountKeychain:
             allowed_calls=allowed_calls,
         )
         # Use the 4-overload authorizeKey via the witness selector
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.authorizeKey(key_id, signature_type, restrictions, witness).data
+        data = ACCOUNT_KEYCHAIN.fns.authorizeKey(key_id, signature_type, restrictions, witness).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
     def revoke_key(*, key_id: str) -> Call:
         """Build a ``revokeKey(address)`` call."""
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.revokeKey(key_id).data
+        data = ACCOUNT_KEYCHAIN.fns.revokeKey(key_id).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
     def update_spending_limit(*, key_id: str, token: str, new_limit: int) -> Call:
         """Build an ``updateSpendingLimit(address,address,uint256)`` call."""
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.updateSpendingLimit(key_id, token, new_limit).data
+        data = ACCOUNT_KEYCHAIN.fns.updateSpendingLimit(key_id, token, new_limit).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
@@ -184,37 +184,37 @@ class AccountKeychain:
                 scopes=[(token_addr, [(b"\\\\xa9\\\\x05\\\\x9c\\\\xbb", [])])],
             )
         """
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.setAllowedCalls(key_id, scopes).data
+        data = ACCOUNT_KEYCHAIN.fns.setAllowedCalls(key_id, scopes).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
     def remove_allowed_calls(*, key_id: str, target: str) -> Call:
         """Build a ``removeAllowedCalls(address,address)`` call."""
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.removeAllowedCalls(key_id, target).data
+        data = ACCOUNT_KEYCHAIN.fns.removeAllowedCalls(key_id, target).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
     def authorize_admin_key(*, key_id: str, signature_type: int, witness: bytes) -> Call:
         """Build an ``authorizeAdminKey(address,uint8,bytes32)`` call (T6)."""
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.authorizeAdminKey(key_id, signature_type, witness).data
+        data = ACCOUNT_KEYCHAIN.fns.authorizeAdminKey(key_id, signature_type, witness).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
     def burn_key_auth_witness(*, witness: bytes) -> Call:
         """Build a ``burnKeyAuthorizationWitness(bytes32)`` call."""
-        data = ACCOUNT_KEYCHAIN_CONTRACT.fns.burnKeyAuthorizationWitness(witness).data
+        data = ACCOUNT_KEYCHAIN.fns.burnKeyAuthorizationWitness(witness).data
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
     def is_admin_key(w3, *, account: str, key_id: str) -> bool:
         """Query ``isAdminKey(address,address)`` (read-only, needs Web3)."""
-        fn = ACCOUNT_KEYCHAIN_CONTRACT.fns.isAdminKey(account, key_id)
+        fn = ACCOUNT_KEYCHAIN.fns.isAdminKey(account, key_id)
         raw = w3.eth.call({"to": ACCOUNT_KEYCHAIN_ADDRESS, "data": fn.data})
         return fn.decode(raw)
 
     @staticmethod
     def is_key_auth_witness_burned(w3, *, account: str, witness: bytes) -> bool:
         """Query ``isKeyAuthorizationWitnessBurned(address,bytes32)`` (read-only)."""
-        fn = ACCOUNT_KEYCHAIN_CONTRACT.fns.isKeyAuthorizationWitnessBurned(account, witness)
+        fn = ACCOUNT_KEYCHAIN.fns.isKeyAuthorizationWitnessBurned(account, witness)
         raw = w3.eth.call({"to": ACCOUNT_KEYCHAIN_ADDRESS, "data": fn.data})
         return fn.decode(raw)

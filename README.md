@@ -10,22 +10,16 @@ Pure functions + data model classes, provider-agnostic calldata building.
 from tempo import TempoTransaction, Call, Signer, Builder
 from tempo.constants import CHAIN_ID_MODERATO, ALPHA_USD
 from tempo.transaction import sign_transaction, serialize
-from tempo.contracts import TIP20_CONTRACT
+from tempo.contracts import TIP20
 
-# Build a transaction
 tx = TempoTransaction.create(
     chain_id=CHAIN_ID_MODERATO,
     gas_limit=100_000,
     max_fee_per_gas=2_000_000_000,
-    calls=(Call.create(to=ALPHA_USD, data=TIP20_CONTRACT.fns.transfer(to, amount).data),),
+    calls=(Call.create(to=ALPHA_USD, data=TIP20.fns.transfer(to, amount).data),),
 )
-
-# Sign and serialize
 signed = sign_transaction(tx, Signer("0x..."))
 hex_tx = serialize(signed)  # "0x76..."
-
-# Send via web3.py
-# w3.eth.send_raw_transaction(hex_tx)
 ```
 
 ## Modules
@@ -34,34 +28,25 @@ hex_tx = serialize(signed)  # "0x76..."
 |---|---|
 | `tempo.models` | `Call`, `Signature`, `TempoTransaction` — attrs frozen data models |
 | `tempo.signer` | `Signer`, `recover_address`, `verify_signature` |
-| `tempo.transaction` | RLP serialization, signing, fee sponsorship, Builder, TIP-20 encoding |
+| `tempo.transaction` | RLP serialization, signing, fee sponsorship, Builder |
 | `tempo.client` | JSON-RPC client (`send_raw_transaction`, `get_nonce`, …) |
 | `tempo.keychain` | Access key models (`KeyAuthorization`, `KeyRestrictions`, `CallScope`, …) |
-| `tempo.contracts` | `Contract.from_abi()` instances + typed wrappers for TIP20, AccountKeychain |
+| `tempo.contracts` | `Contract.from_abi()` instances + typed wrappers |
 
 ## eth-contract style
 
-Contracts are defined with human-readable ABIs and shared globally. Calldata building is a pure function — no `Web3` instance required.
+Contracts defined with human-readable ABIs, shared globally. Calldata is a pure function — no `Web3` instance required.
 
 ```python
-from tempo.contracts import TIP20_CONTRACT, ACCOUNT_KEYCHAIN_CONTRACT
+from tempo.contracts import TIP20, ACCOUNT_KEYCHAIN
 
-data = TIP20_CONTRACT.fns.transfer(to, amount).data                     # pure bytes
-data = ACCOUNT_KEYCHAIN_CONTRACT.fns.revokeKey(key_id).data             # pure bytes
-data = ACCOUNT_KEYCHAIN_CONTRACT.fns.authorizeKey(id, t,                # with struct tuple
-    (0, False, [], True, [])).data
+data = TIP20.fns.transfer(to, amount).data                 # pure bytes
+data = ACCOUNT_KEYCHAIN.fns.revokeKey(key_id).data         # pure bytes
+data = ACCOUNT_KEYCHAIN.fns.authorizeKey(id, sig_type,
+    (0, False, [], True, [])).data                         # with struct tuple
 ```
 
-Or via typed wrappers with keyword arguments:
 
-```python
-from tempo.contracts import TIP20, AccountKeychain
-
-alpha = TIP20(ALPHA_USD)
-alpha.transfer(to=recipient, amount=10**18)  # -> Call
-
-AccountKeychain.revoke_key(key_id=key_id)    # -> Call
-```
 
 ## References
 

@@ -20,20 +20,22 @@ from .addresses import (
     TIP403_REGISTRY_ADDRESS,
     VALIDATOR_CONFIG_ADDRESS,
 )
-from .keychain import ACCOUNT_KEYCHAIN_CONTRACT, AccountKeychain
-from .tip20 import TIP20_CONTRACT, TIP20_ROLES_CONTRACT, TIP20
+from .keychain import ACCOUNT_KEYCHAIN, AccountKeychain
+from .tip20 import (
+    TIP20,
+    TIP20_ROLES,
+)
 
 __all__ = [
-    # Typed call builders
-    "TIP20",
-    "AccountKeychain",
     # Global Contract instances (eth-contract style)
-    "TIP20_CONTRACT",
-    "TIP20_ROLES_CONTRACT",
-    "ACCOUNT_KEYCHAIN_CONTRACT",
+    "TIP20",
+    "TIP20_ROLES",
+    "ACCOUNT_KEYCHAIN",
+    # Token addresses
     "ALPHA_USD",
     "BETA_USD",
     "THETA_USD",
+    "PATH_USD",
     # Precompile addresses
     "ACCOUNT_KEYCHAIN_ADDRESS",
     "FEE_MANAGER_ADDRESS",
