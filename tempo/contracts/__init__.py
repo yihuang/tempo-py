@@ -31,6 +31,8 @@ __all__ = [
     "TIP20",
     "TIP20_ROLES",
     "ACCOUNT_KEYCHAIN",
+    "AccountKeychain",
+    # Token addresses
     # Token addresses
     "ALPHA_USD",
     "BETA_USD",

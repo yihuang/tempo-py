@@ -4,9 +4,9 @@ The Signer wraps a secp256k1 private key and computes, recovers, and verifies
 signatures.  ``recover_address`` is a pure function usable without a Signer
 instance.
 """
-from eth_utils import keccak, to_bytes
 
 from eth_account import Account
+from eth_utils import keccak, to_bytes
 
 from .models import SECP256K1_HALF_N, SECP256K1_N, Signature
 from .types import Address, BytesLike, as_address

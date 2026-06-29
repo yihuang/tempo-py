@@ -13,7 +13,6 @@ from .signer import Signer
 from .types import Address, BytesLike, as_address, as_optional_address
 
 
-
 def parse_topic_address(topic: str) -> Address:
     """Extract the address from an indexed event topic hex string."""
     raw = topic.removeprefix("0x")
@@ -26,6 +25,7 @@ def parse_topic_address(topic: str) -> Address:
 # ---------------------------------------------------------------------------
 # RLP serialization helpers
 # ---------------------------------------------------------------------------
+
 
 def _int_to_rlp_bytes(value: int) -> bytes:
     """Convert an integer to RLP-friendly bytes (empty if zero)."""
@@ -113,6 +113,7 @@ def _encode_fee_token(tx: TempoTransaction, for_signing: bool) -> bytes:
 # ---------------------------------------------------------------------------
 # Serialize
 # ---------------------------------------------------------------------------
+
 
 def serialize_for_signing(tx: TempoTransaction) -> str:
     """Serialize a transaction for sender signing (no signatures).
@@ -205,6 +206,7 @@ def _build_rlp_fields(
 # Deserialize
 # ---------------------------------------------------------------------------
 
+
 def compute_hash(serialized_hex: str) -> bytes:
     """Compute keccak256 hash of a serialized transaction hex string."""
     raw = to_bytes(hexstr=serialized_hex)
@@ -227,6 +229,7 @@ def get_fee_payer_sign_payload(tx: TempoTransaction, sender: BytesLike) -> bytes
 # Signing
 # ---------------------------------------------------------------------------
 
+
 def sign_transaction(tx: TempoTransaction, signer: Signer) -> TempoTransaction:
     """Sign a transaction with the sender's private key.
 
@@ -241,17 +244,13 @@ def sign_transaction(tx: TempoTransaction, signer: Signer) -> TempoTransaction:
     )
 
 
-def add_fee_payer_signature(
-    tx: TempoTransaction, fee_payer: Signer
-) -> TempoTransaction:
+def add_fee_payer_signature(tx: TempoTransaction, fee_payer: Signer) -> TempoTransaction:
     """Add a fee payer signature to an already-sender-signed transaction.
 
     Returns a new TempoTransaction with the fee payer signature attached.
     """
     if tx.sender_signature is None:
-        raise ValueError(
-            "transaction must have sender signature before adding fee payer signature"
-        )
+        raise ValueError("transaction must have sender signature before adding fee payer signature")
 
     sender = tx.sender_address
     hash_to_sign = get_fee_payer_sign_payload(tx, sender)
@@ -274,9 +273,7 @@ def verify_signature(tx: TempoTransaction) -> Address:
     return recover_address(hash_signed, tx.sender_signature)
 
 
-def verify_fee_payer_signature(
-    tx: TempoTransaction, sender: BytesLike
-) -> Address:
+def verify_fee_payer_signature(tx: TempoTransaction, sender: BytesLike) -> Address:
     """Recover and return the fee payer address from a signed transaction."""
     if tx.fee_payer_signature is None:
         raise ValueError("transaction has no fee payer signature")
@@ -290,6 +287,7 @@ def verify_fee_payer_signature(
 # ---------------------------------------------------------------------------
 # TempoTransaction._replace_fields (monkey-patch to avoid circular import)
 # ---------------------------------------------------------------------------
+
 
 def _replace_fields(
     tx: TempoTransaction,
@@ -407,9 +405,7 @@ class Builder:
     ) -> Builder:
         from .models import AccessListItem
 
-        self._access_list.append(
-            AccessListItem.create(address=address, storage_keys=storage_keys)
-        )
+        self._access_list.append(AccessListItem.create(address=address, storage_keys=storage_keys))
         return self
 
     def build(self) -> TempoTransaction:
@@ -428,5 +424,3 @@ class Builder:
             calls=tuple(self._calls),
             access_list=tuple(self._access_list),
         )
-
-

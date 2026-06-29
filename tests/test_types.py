@@ -1,7 +1,8 @@
 """Tests for tempo.types."""
 
 import pytest
-from tempo.types import as_address, as_bytes, as_hash32, as_selector, as_optional_address
+
+from tempo.types import as_address, as_bytes, as_hash32, as_optional_address, as_selector
 
 
 class TestAsBytes:

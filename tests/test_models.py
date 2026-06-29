@@ -1,8 +1,9 @@
 """Tests for tempo.models."""
 
 import pytest
-from tempo.models import Call, Signature, AccessListItem, TempoTransaction
+
 from tempo.constants import CHAIN_ID_MODERATO
+from tempo.models import Call, Signature, TempoTransaction
 
 
 class TestCall:
@@ -94,6 +95,7 @@ class TestTempoTransaction:
 
     def test_clone_drops_signatures(self):
         import attrs
+
         tx = TempoTransaction.create()
         signed = attrs.evolve(tx, sender_signature=Signature(r=1, s=1, v=0))
         assert signed.has_sender_signature
@@ -102,14 +104,16 @@ class TestTempoTransaction:
         assert cloned.chain_id == tx.chain_id
 
     def test_from_dict_camelCase(self):
-        tx = TempoTransaction.from_dict({
-            "chainId": 42431,
-            "gas": 100_000,
-            "maxFeePerGas": 2_000_000_000,
-            "nonce": 5,
-            "to": "0x" + "01" * 20,
-            "value": 1000,
-        })
+        tx = TempoTransaction.from_dict(
+            {
+                "chainId": 42431,
+                "gas": 100_000,
+                "maxFeePerGas": 2_000_000_000,
+                "nonce": 5,
+                "to": "0x" + "01" * 20,
+                "value": 1000,
+            }
+        )
         assert tx.chain_id == 42431
         assert tx.gas_limit == 100_000
         assert tx.max_fee_per_gas == 2_000_000_000
@@ -118,10 +122,12 @@ class TestTempoTransaction:
         assert tx.calls[0].value == 1000
 
     def test_from_dict_snake_case(self):
-        tx = TempoTransaction.from_dict({
-            "chain_id": 42431,
-            "gas_limit": 100_000,
-            "calls": [{"to": "0x" + "01" * 20, "value": 42}],
-        })
+        tx = TempoTransaction.from_dict(
+            {
+                "chain_id": 42431,
+                "gas_limit": 100_000,
+                "calls": [{"to": "0x" + "01" * 20, "value": 42}],
+            }
+        )
         assert tx.chain_id == 42431
         assert tx.calls[0].value == 42

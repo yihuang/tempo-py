@@ -15,6 +15,7 @@ from .types import (
     as_hash32,
     as_optional_address,
 )
+
 # Signature validation constants
 # ---------------------------------------------------------------------------
 SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -24,6 +25,7 @@ SECP256K1_HALF_N = SECP256K1_N // 2
 # ---------------------------------------------------------------------------
 # Call
 # ---------------------------------------------------------------------------
+
 
 @attrs.define(frozen=True)
 class Call:
@@ -61,6 +63,7 @@ class Call:
 # Access List
 # ---------------------------------------------------------------------------
 
+
 @attrs.define(frozen=True)
 class AccessListItem:
     """Single entry in an EIP-2930 access list."""
@@ -95,6 +98,7 @@ class AccessListItem:
 # ---------------------------------------------------------------------------
 # Signature
 # ---------------------------------------------------------------------------
+
 
 def _validate_sig_r(instance: object, attribute: object, value: int) -> None:
     if not (0 < value < SECP256K1_N):
@@ -131,11 +135,7 @@ class Signature:
         return self.v if self.v in (0, 1) else self.v - 27
 
     def to_bytes(self) -> bytes:
-        return (
-            self.r.to_bytes(32, "big")
-            + self.s.to_bytes(32, "big")
-            + bytes([self.v])
-        )
+        return self.r.to_bytes(32, "big") + self.s.to_bytes(32, "big") + bytes([self.v])
 
     def to_rlp_list(self) -> list:
         """Return [y_parity, r, s] for RLP encoding (fee_payer_signature)."""
@@ -155,6 +155,7 @@ class Signature:
 # ---------------------------------------------------------------------------
 # TempoTransaction
 # ---------------------------------------------------------------------------
+
 
 def _convert_calls(calls: tuple[Call, ...]) -> tuple[Call, ...]:
     return tuple(calls)
@@ -192,9 +193,7 @@ class TempoTransaction:
     gas_limit: int = 21_000  # renamed from `gas` to align with web3.py conventions
 
     calls: tuple[Call, ...] = attrs.field(factory=tuple, converter=_convert_calls)
-    access_list: tuple[AccessListItem, ...] = attrs.field(
-        factory=tuple, converter=_convert_access_list
-    )
+    access_list: tuple[AccessListItem, ...] = attrs.field(factory=tuple, converter=_convert_access_list)
 
     nonce_key: int = 0
     nonce: int = 0
@@ -209,9 +208,7 @@ class TempoTransaction:
     fee_payer_signature: Optional[Signature] = None
     awaiting_fee_payer: bool = False
 
-    sender_address: Optional[Address] = attrs.field(
-        default=None, converter=as_optional_address
-    )
+    sender_address: Optional[Address] = attrs.field(default=None, converter=as_optional_address)
 
     # Authorization list (reserved for EIP-7702)
     tempo_authorization_list: tuple[bytes, ...] = attrs.field(factory=tuple)
@@ -276,9 +273,7 @@ class TempoTransaction:
             return default
 
         chain_id = _get("chainId", "chain_id", default=DEFAULT_CHAIN_ID)
-        max_priority_fee = _get(
-            "maxPriorityFeePerGas", "max_priority_fee_per_gas", default=0
-        )
+        max_priority_fee = _get("maxPriorityFeePerGas", "max_priority_fee_per_gas", default=0)
         max_fee = _get("maxFeePerGas", "max_fee_per_gas", default=0)
         gas_limit = _get("gas", "gasLimit", "gas_limit", default=21_000)
 
@@ -297,7 +292,8 @@ class TempoTransaction:
                 value=call.get("value", 0),
                 data=call.get("data", call.get("input", "0x")),
             )
-            for call in list(calls_data) if isinstance(calls_data, (list, tuple))
+            for call in list(calls_data)
+            if isinstance(calls_data, (list, tuple))
         )
 
         # Parse access list
@@ -307,7 +303,8 @@ class TempoTransaction:
                 address=item.get("address", ""),
                 storage_keys=item.get("storageKeys", item.get("storage_keys", ())),
             )
-            for item in list(access_list_data) if isinstance(access_list_data, (list, tuple))
+            for item in list(access_list_data)
+            if isinstance(access_list_data, (list, tuple))
         )
 
         nk = _get("nonceKey", "nonce_key", default=0)
@@ -327,9 +324,7 @@ class TempoTransaction:
             awaiting_fee_payer=_get("awaitingFeePayer", "awaiting_fee_payer", default=False),
             calls=calls,
             access_list=access_list,
-            tempo_authorization_list=_get(
-                "tempoAuthorizationList", "tempo_authorization_list", default=()
-            ),
+            tempo_authorization_list=_get("tempoAuthorizationList", "tempo_authorization_list", default=()),
             key_authorization=_get("keyAuthorization", "key_authorization", default=None),
         )
 
@@ -352,5 +347,3 @@ class TempoTransaction:
             sender_signature=None,
             fee_payer_signature=None,
         )
-
-

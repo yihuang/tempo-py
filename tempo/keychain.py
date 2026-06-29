@@ -12,10 +12,10 @@ from typing import Optional
 import attrs
 from eth_utils import keccak
 
+from .contracts.tip20 import TIP20
 from .models import Signature, TempoTransaction
 from .signer import Signer
 from .transaction import get_sign_payload
-from .contracts.tip20 import TIP20
 from .types import (
     Address,
     BytesLike,
@@ -62,9 +62,7 @@ class SignatureType(IntEnum):
 # ---------------------------------------------------------------------------
 
 
-def _validate_token_limit(
-    instance: object, attribute: object, value: int
-) -> None:
+def _validate_token_limit(instance: object, attribute: object, value: int) -> None:
     if value < 0:
         raise ValueError(f"limit/period must be non-negative, got {value}")
 
@@ -84,9 +82,7 @@ class TokenLimit:
     period: int = attrs.field(default=0, validator=_validate_token_limit)
 
     @classmethod
-    def create(
-        cls, token: BytesLike, limit: int, period: int = 0
-    ) -> TokenLimit:
+    def create(cls, token: BytesLike, limit: int, period: int = 0) -> TokenLimit:
         """Construct with type coercion."""
         return cls(token=token, limit=limit, period=period)
 
@@ -110,9 +106,7 @@ class SelectorRule:
     """
 
     selector: bytes = attrs.field(converter=as_bytes)
-    recipients: tuple[Address, ...] = attrs.field(
-        converter=lambda v: tuple(as_address(a) for a in v)
-    )
+    recipients: tuple[Address, ...] = attrs.field(converter=lambda v: tuple(as_address(a) for a in v))
 
     @classmethod
     def create(
@@ -313,9 +307,7 @@ class KeyAuthorization:
 
     # Mandatory fields first (no defaults)
     key_id: Address = attrs.field(converter=as_address, validator=validate_nonempty_address)
-    account: Address = attrs.field(
-        converter=as_address, validator=validate_nonempty_address
-    )
+    account: Address = attrs.field(converter=as_address, validator=validate_nonempty_address)
 
     # Fields with defaults
     chain_id: int = 0
@@ -411,10 +403,7 @@ class KeychainSignature:
 
     def __attrs_post_init__(self) -> None:
         if len(self.raw) != KEYCHAIN_SIGNATURE_LENGTH:
-            raise ValueError(
-                f"KeychainSignature must be {KEYCHAIN_SIGNATURE_LENGTH} bytes, "
-                f"got {len(self.raw)}"
-            )
+            raise ValueError(f"KeychainSignature must be {KEYCHAIN_SIGNATURE_LENGTH} bytes, got {len(self.raw)}")
 
     @classmethod
     def from_inner(
@@ -499,22 +488,14 @@ def _abi_encode_authorization(
     # We skip complex ABI offset encoding and instead hash each array element
     # separately, then hash the concatenation of hashes.
     limit_hashes = b"".join(
-        keccak(
-            _pad32(t.token)
-            + _pad32(t.limit.to_bytes(32, "big"))
-            + _pad32(t.period.to_bytes(32, "big"))
-        )
+        keccak(_pad32(t.token) + _pad32(t.limit.to_bytes(32, "big")) + _pad32(t.period.to_bytes(32, "big")))
         for t in limits
     )
     parts.append(_pad32(keccak(limit_hashes) if limit_hashes else bytes(32)))
 
     # Dynamic: allowed_calls[]
     call_hashes = b"".join(
-        keccak(
-            _pad32(cs.target)
-            + _pad32(cs.selector)
-            + _encode_selector_rules(cs.selector_rules)
-        )
+        keccak(_pad32(cs.target) + _pad32(cs.selector) + _encode_selector_rules(cs.selector_rules))
         for cs in allowed_calls
     )
     parts.append(_pad32(keccak(call_hashes) if call_hashes else bytes(32)))
@@ -528,13 +509,7 @@ def _abi_encode_authorization(
 
 def _encode_selector_rules(rules: tuple[SelectorRule, ...]) -> bytes:
     """Encode a list of SelectorRule for hashing."""
-    rule_hashes = b"".join(
-        keccak(
-            _pad32(r.selector)
-            + _encode_address_array(r.recipients)
-        )
-        for r in rules
-    )
+    rule_hashes = b"".join(keccak(_pad32(r.selector) + _encode_address_array(r.recipients)) for r in rules)
     return keccak(rule_hashes) if rule_hashes else bytes(32)
 
 

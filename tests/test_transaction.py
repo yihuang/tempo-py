@@ -1,20 +1,25 @@
 """Tests for tempo.transaction."""
 
 import pytest
-from tempo import TempoTransaction, Call, Signer, Builder
+
+from tempo import Call, Signer, TempoTransaction
+from tempo.constants import ACCOUNT_KEYCHAIN_ADDRESS, ALPHA_USD, CHAIN_ID_MODERATO
+from tempo.contracts import TIP20
 from tempo.transaction import (
-    serialize_for_signing,
-    serialize,
-    sign_transaction,
-    add_fee_payer_signature,
-    get_sign_payload,
-    get_fee_payer_sign_payload,
-    verify_signature as verify_tx_sig,
-    verify_fee_payer_signature,
     Builder as TxBuilder,
 )
-from tempo.constants import CHAIN_ID_MODERATO, ALPHA_USD, ACCOUNT_KEYCHAIN_ADDRESS
-from tempo.contracts import TIP20
+from tempo.transaction import (
+    add_fee_payer_signature,
+    get_fee_payer_sign_payload,
+    get_sign_payload,
+    serialize,
+    serialize_for_signing,
+    sign_transaction,
+    verify_fee_payer_signature,
+)
+from tempo.transaction import (
+    verify_signature as verify_tx_sig,
+)
 
 TEST_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 FEE_PAYER_PK = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
@@ -24,6 +29,7 @@ RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 # ---------------------------------------------------------------------------
 # TIP-20 encoding via TIP20_CONTRACT
 # ---------------------------------------------------------------------------
+
 
 class TestTIP20Encoding:
     def test_transfer_selector_and_size(self):
@@ -53,6 +59,7 @@ class TestTIP20Encoding:
 # Serialization
 # ---------------------------------------------------------------------------
 
+
 class TestSerialization:
     def test_serialize_for_signing_prefix(self):
         tx = _make_tx()
@@ -67,6 +74,7 @@ class TestSerialization:
 
     def test_serialize_for_fee_payer_signing(self):
         from tempo.transaction import serialize_for_fee_payer_signing
+
         tx = _make_tx(awaiting_fee_payer=True)
         signer = Signer(TEST_PK)
         signed_by_sender = sign_transaction(tx, signer)
@@ -88,6 +96,7 @@ class TestSerialization:
 # ---------------------------------------------------------------------------
 # Signing
 # ---------------------------------------------------------------------------
+
 
 class TestSigning:
     def test_sign_transaction(self):
@@ -134,7 +143,8 @@ class TestSigning:
         tx1 = _make_tx()
         tx2 = _make_tx()
         tx2 = TempoTransaction.create(
-            chain_id=tx2.chain_id, gas_limit=tx2.gas_limit,
+            chain_id=tx2.chain_id,
+            gas_limit=tx2.gas_limit,
             max_fee_per_gas=tx2.max_fee_per_gas,
             calls=(Call.create(to=RECIPIENT, value=999),),
         )
@@ -147,63 +157,70 @@ class TestSigning:
 # Builder
 # ---------------------------------------------------------------------------
 
+
 class TestBuilder:
     def test_build_basic(self):
-        tx = (TxBuilder()
-              .chain_id(CHAIN_ID_MODERATO)
-              .gas_limit(100_000)
-              .max_fee_per_gas(2_000_000_000)
-              .nonce(0)
-              .add_call(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data)
-              .build())
+        tx = (
+            TxBuilder()
+            .chain_id(CHAIN_ID_MODERATO)
+            .gas_limit(100_000)
+            .max_fee_per_gas(2_000_000_000)
+            .nonce(0)
+            .add_call(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data)
+            .build()
+        )
         assert tx.chain_id == CHAIN_ID_MODERATO
         assert len(tx.calls) == 1
 
     def test_build_multiple_calls(self):
-        tx = (TxBuilder()
-              .chain_id(CHAIN_ID_MODERATO)
-              .gas_limit(200_000)
-              .add_call(to=ALPHA_USD, data=b"")
-              .add_call(to=ACCOUNT_KEYCHAIN_ADDRESS, data=b"")
-              .build())
+        tx = (
+            TxBuilder()
+            .chain_id(CHAIN_ID_MODERATO)
+            .gas_limit(200_000)
+            .add_call(to=ALPHA_USD, data=b"")
+            .add_call(to=ACCOUNT_KEYCHAIN_ADDRESS, data=b"")
+            .build()
+        )
         assert len(tx.calls) == 2
 
     def test_build_signing_roundtrip(self):
-        tx = (TxBuilder()
-              .chain_id(CHAIN_ID_MODERATO)
-              .gas_limit(100_000)
-              .max_fee_per_gas(2_000_000_000)
-              .nonce(0)
-              .add_call(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data)
-              .build())
+        tx = (
+            TxBuilder()
+            .chain_id(CHAIN_ID_MODERATO)
+            .gas_limit(100_000)
+            .max_fee_per_gas(2_000_000_000)
+            .nonce(0)
+            .add_call(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data)
+            .build()
+        )
         signed = sign_transaction(tx, Signer(TEST_PK))
         ser = serialize(signed)
         assert ser.startswith("0x76")
 
     def test_build_with_validity_window(self):
         import time
+
         now = int(time.time())
-        tx = (TxBuilder()
-              .chain_id(CHAIN_ID_MODERATO)
-              .valid_after(now)
-              .valid_before(now + 3600)
-              .add_call(to=ALPHA_USD, data=b"")
-              .build())
+        tx = (
+            TxBuilder()
+            .chain_id(CHAIN_ID_MODERATO)
+            .valid_after(now)
+            .valid_before(now + 3600)
+            .add_call(to=ALPHA_USD, data=b"")
+            .build()
+        )
         assert tx.valid_after == now
         assert tx.valid_before == now + 3600
 
     def test_build_with_fee_token(self):
-        tx = (TxBuilder()
-              .chain_id(CHAIN_ID_MODERATO)
-              .fee_token(ALPHA_USD)
-              .add_call(to=RECIPIENT, data=b"")
-              .build())
+        tx = TxBuilder().chain_id(CHAIN_ID_MODERATO).fee_token(ALPHA_USD).add_call(to=RECIPIENT, data=b"").build()
         assert tx.fee_token is not None
 
 
 # ---------------------------------------------------------------------------
 # Sign payload
 # ---------------------------------------------------------------------------
+
 
 class TestPayload:
     def test_get_sign_payload_type(self):
@@ -225,6 +242,7 @@ class TestPayload:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_tx(awaiting_fee_payer: bool = False) -> TempoTransaction:
     return TempoTransaction.create(
         chain_id=CHAIN_ID_MODERATO,
@@ -234,7 +252,5 @@ def _make_tx(awaiting_fee_payer: bool = False) -> TempoTransaction:
         nonce=0,
         nonce_key=0,
         awaiting_fee_payer=awaiting_fee_payer,
-        calls=(
-            Call.create(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data),
-        ),
+        calls=(Call.create(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data),),
     )

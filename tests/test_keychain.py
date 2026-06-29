@@ -1,18 +1,16 @@
 """Tests for tempo.keychain — access key models and key authorization."""
 
-import pytest
+from tempo.constants import ALPHA_USD
 from tempo.keychain import (
-    SignatureType,
-    TokenLimit,
-    SelectorRule,
     CallScope,
-    KeyRestrictions,
     KeyAuthorization,
     KeychainSignature,
+    KeyRestrictions,
+    SelectorRule,
+    SignatureType,
+    TokenLimit,
     build_keychain_signature,
-    create_key_authorization,
 )
-from tempo.constants import ALPHA_USD
 from tempo.models import Signature
 
 RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
@@ -23,6 +21,7 @@ ACCOUNT = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 # ---------------------------------------------------------------------------
 # SignatureType
 # ---------------------------------------------------------------------------
+
 
 class TestSignatureType:
     def test_values(self):
@@ -37,6 +36,7 @@ class TestSignatureType:
 # ---------------------------------------------------------------------------
 # TokenLimit
 # ---------------------------------------------------------------------------
+
 
 class TestTokenLimit:
     def test_create_basic(self):
@@ -58,6 +58,7 @@ class TestTokenLimit:
 # ---------------------------------------------------------------------------
 # SelectorRule
 # ---------------------------------------------------------------------------
+
 
 class TestSelectorRule:
     def test_create(self):
@@ -81,6 +82,7 @@ class TestSelectorRule:
 # ---------------------------------------------------------------------------
 # CallScope
 # ---------------------------------------------------------------------------
+
 
 class TestCallScope:
     def test_transfer(self):
@@ -107,6 +109,7 @@ class TestCallScope:
 # ---------------------------------------------------------------------------
 # KeyRestrictions
 # ---------------------------------------------------------------------------
+
 
 class TestKeyRestrictions:
     def test_create_default(self):
@@ -138,6 +141,7 @@ class TestKeyRestrictions:
 # ---------------------------------------------------------------------------
 # KeyAuthorization
 # ---------------------------------------------------------------------------
+
 
 class TestKeyAuthorization:
     def test_create_minimal(self):
@@ -194,10 +198,12 @@ class TestKeyAuthorization:
 # KeychainSignature & build helpers
 # ---------------------------------------------------------------------------
 
+
 class TestKeychain:
     def test_build_keychain_signature_length(self):
         sig = Signature(r=1, s=1, v=0)
         from tempo.types import as_address
+
         addr = as_address(ACCOUNT)
         raw = build_keychain_signature(sig, addr)
         assert len(raw) == 86
@@ -205,6 +211,7 @@ class TestKeychain:
     def test_keychain_signature_parse(self):
         sig = Signature(r=1, s=1, v=0)
         from tempo.types import as_address
+
         addr = as_address(ACCOUNT)
         raw = build_keychain_signature(sig, addr)
         ks = KeychainSignature(raw=raw)
@@ -216,13 +223,15 @@ class TestKeychain:
 # Constants
 # ---------------------------------------------------------------------------
 
+
 class TestKeychainConstants:
     def test_constants(self):
         from tempo.keychain import (
-            KEYCHAIN_SIGNATURE_TYPE,
-            KEYCHAIN_SIGNATURE_LENGTH,
             INNER_SIGNATURE_LENGTH,
+            KEYCHAIN_SIGNATURE_LENGTH,
+            KEYCHAIN_SIGNATURE_TYPE,
         )
+
         assert KEYCHAIN_SIGNATURE_TYPE == 0x04
         assert KEYCHAIN_SIGNATURE_LENGTH == 86
         assert INNER_SIGNATURE_LENGTH == 65

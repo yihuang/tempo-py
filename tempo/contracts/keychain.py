@@ -11,43 +11,44 @@ scopes (set_allowed_calls with many rules) use the same Contract directly.
 from eth_contract import Contract
 
 from ..models import Call
-
 from .addresses import ACCOUNT_KEYCHAIN_ADDRESS
 
 # ---------------------------------------------------------------------------
 # Global Contract instance — shared, reusable, public
 # ---------------------------------------------------------------------------
-ACCOUNT_KEYCHAIN = Contract.from_abi([
-    """struct TokenLimit {
+ACCOUNT_KEYCHAIN = Contract.from_abi(
+    [
+        """struct TokenLimit {
         address token;
         uint256 amount;
         uint64 period;
     }""",
-    """struct SelectorRule {
+        """struct SelectorRule {
         bytes4 selector;
         address[] recipients;
     }""",
-    """struct CallScope {
+        """struct CallScope {
         address target;
         SelectorRule[] selectorRules;
     }""",
-    """struct KeyRestrictions {
+        """struct KeyRestrictions {
         uint64 expiry;
         bool enforceLimits;
         TokenLimit[] limits;
         bool allowAnyCalls;
         CallScope[] allowedCalls;
     }""",
-    "function authorizeKey(address keyId, uint8 signatureType, KeyRestrictions restrictions)",
-    "function revokeKey(address keyId)",
-    "function updateSpendingLimit(address keyId, address token, uint256 newLimit)",
-    "function setAllowedCalls(address keyId, CallScope[] scopes)",
-    "function removeAllowedCalls(address keyId, address target)",
-    "function authorizeAdminKey(address keyId, uint8 signatureType, bytes32 witness)",
-    "function burnKeyAuthorizationWitness(bytes32 witness)",
-    "function isKeyAuthorizationWitnessBurned(address account, bytes32 witness) view returns (bool)",
-    "function isAdminKey(address account, address keyId) view returns (bool)",
-])
+        "function authorizeKey(address keyId, uint8 signatureType, KeyRestrictions restrictions)",
+        "function revokeKey(address keyId)",
+        "function updateSpendingLimit(address keyId, address token, uint256 newLimit)",
+        "function setAllowedCalls(address keyId, CallScope[] scopes)",
+        "function removeAllowedCalls(address keyId, address target)",
+        "function authorizeAdminKey(address keyId, uint8 signatureType, bytes32 witness)",
+        "function burnKeyAuthorizationWitness(bytes32 witness)",
+        "function isKeyAuthorizationWitnessBurned(address account, bytes32 witness) view returns (bool)",
+        "function isAdminKey(address account, address keyId) view returns (bool)",
+    ]
+)
 
 
 def _build_restrictions_tuple(
@@ -65,7 +66,7 @@ def _build_restrictions_tuple(
     return (
         expiry,
         enforce_limits,
-        [tuple(l) for l in (limits or [])],
+        [tuple(lim) for lim in (limits or [])],
         allow_any_calls,
         [(_scope_target(s), _scope_rules(s)) for s in (allowed_calls or [])],
     )

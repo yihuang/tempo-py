@@ -4,14 +4,16 @@ All selector assertions are derived from the Contract instances themselves,
 never hardcoded. This ensures tests stay in sync with the ABI definitions.
 """
 
-import pytest
 from tempo.contracts import (
-    TIP20, TIP20_ROLES,
     ACCOUNT_KEYCHAIN,
+    ACCOUNT_KEYCHAIN_ADDRESS,
+    ALPHA_USD,
+    TIP20,
+    TIP20_ROLES,
     AccountKeychain,
-    ALPHA_USD, ACCOUNT_KEYCHAIN_ADDRESS,
 )
 from tempo.models import Call
+
 RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 KEY_ID = "0xaaaaaaaa00000000000000000000000000000000"
 
@@ -19,6 +21,7 @@ KEY_ID = "0xaaaaaaaa00000000000000000000000000000000"
 # ---------------------------------------------------------------------------
 # TIP20_CONTRACT — direct eth-contract usage
 # ---------------------------------------------------------------------------
+
 
 class TestTIP20ContractDirect:
     def test_transfer_calldata(self):
@@ -64,11 +67,10 @@ class TestTIP20RolesContract:
         assert data[:4] == bytes(TIP20_ROLES.fns.renounceRole.selector)
 
 
-
-
 # ---------------------------------------------------------------------------
 # ACCOUNT_KEYCHAIN — direct eth-contract usage
 # ---------------------------------------------------------------------------
+
 
 class TestAccountKeychainDirect:
     def test_revoke_key(self):
@@ -78,26 +80,33 @@ class TestAccountKeychainDirect:
 
     def test_authorize_key_simple(self):
         data = ACCOUNT_KEYCHAIN.fns.authorizeKey(
-            KEY_ID, 0, (0, False, [], True, []),
+            KEY_ID,
+            0,
+            (0, False, [], True, []),
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeKey.selector)
 
     def test_authorize_key_with_limits(self):
         data = ACCOUNT_KEYCHAIN.fns.authorizeKey(
-            KEY_ID, 0,
+            KEY_ID,
+            0,
             (1893456000, True, [(ALPHA_USD, 10**18, 86400)], False, []),
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeKey.selector)
 
     def test_update_spending_limit(self):
         data = ACCOUNT_KEYCHAIN.fns.updateSpendingLimit(
-            KEY_ID, ALPHA_USD, 1_000_000,
+            KEY_ID,
+            ALPHA_USD,
+            1_000_000,
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.updateSpendingLimit.selector)
 
     def test_authorize_admin_key(self):
         data = ACCOUNT_KEYCHAIN.fns.authorizeAdminKey(
-            KEY_ID, 0, b"\x00" * 32,
+            KEY_ID,
+            0,
+            b"\x00" * 32,
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeAdminKey.selector)
 
@@ -121,6 +130,7 @@ class TestAccountKeychainDirect:
 # AccountKeychain class — typed wrapper
 # ---------------------------------------------------------------------------
 
+
 class TestAccountKeychainWrapper:
     def test_authorize_key(self):
         call = AccountKeychain.authorize_key(key_id=KEY_ID, signature_type=0)
@@ -129,8 +139,10 @@ class TestAccountKeychainWrapper:
 
     def test_authorize_key_with_limits(self):
         call = AccountKeychain.authorize_key(
-            key_id=KEY_ID, signature_type=0,
-            expiry=1893456000, enforce_limits=True,
+            key_id=KEY_ID,
+            signature_type=0,
+            expiry=1893456000,
+            enforce_limits=True,
             limits=[(ALPHA_USD, 10**18, 86400)],
             allow_any_calls=False,
         )
@@ -142,13 +154,17 @@ class TestAccountKeychainWrapper:
 
     def test_update_spending_limit(self):
         call = AccountKeychain.update_spending_limit(
-            key_id=KEY_ID, token=ALPHA_USD, new_limit=1_000_000,
+            key_id=KEY_ID,
+            token=ALPHA_USD,
+            new_limit=1_000_000,
         )
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.updateSpendingLimit.selector)
 
     def test_authorize_admin_key(self):
         call = AccountKeychain.authorize_admin_key(
-            key_id=KEY_ID, signature_type=0, witness=b"\x00" * 32,
+            key_id=KEY_ID,
+            signature_type=0,
+            witness=b"\x00" * 32,
         )
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeAdminKey.selector)
 
@@ -175,19 +191,23 @@ class TestAccountKeychainWrapper:
 # Cross-module consistency
 # ---------------------------------------------------------------------------
 
+
 class TestContractConsistency:
     def test_tip20_selector_consistency(self):
         # TIP20_CONTRACT selectors match what keychain uses
         from tempo.keychain import CallScope
+
         cs = CallScope.transfer("0x" + "20" * 20)
         assert cs.selector == bytes(TIP20.fns.transfer.selector)
 
     def test_instance_sharing(self):
-        from tempo.contracts.tip20 import TIP20 as C1
         from tempo.contracts import TIP20 as C2
+        from tempo.contracts.tip20 import TIP20 as C1
+
         assert C1 is C2
 
     def test_keychain_instance_sharing(self):
-        from tempo.contracts.keychain import ACCOUNT_KEYCHAIN as C1
         from tempo.contracts import ACCOUNT_KEYCHAIN as C2
+        from tempo.contracts.keychain import ACCOUNT_KEYCHAIN as C1
+
         assert C1 is C2

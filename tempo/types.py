@@ -23,9 +23,7 @@ def as_bytes(value: BytesLike) -> bytes:
         return to_bytes(hexstr=value)
     if isinstance(value, (bytes, bytearray, memoryview)):
         return bytes(value)
-    raise TypeError(
-        f"expected str, bytes, bytearray, or memoryview, got {type(value).__name__}"
-    )
+    raise TypeError(f"expected str, bytes, bytearray, or memoryview, got {type(value).__name__}")
 
 
 def as_address(value: BytesLike) -> Address:
@@ -42,9 +40,7 @@ def as_address(value: BytesLike) -> Address:
     elif isinstance(value, (bytes, bytearray, memoryview)):
         b = bytes(value)
     else:
-        raise TypeError(
-            f"expected str, bytes, bytearray, or memoryview, got {type(value).__name__}"
-        )
+        raise TypeError(f"expected str, bytes, bytearray, or memoryview, got {type(value).__name__}")
     if len(b) not in (0, 20):
         raise ValueError(f"address must be 20 bytes (or empty), got {len(b)}")
     return Address(b)
@@ -72,9 +68,7 @@ def as_hash32(value: BytesLike) -> Hash32:
     elif isinstance(value, (bytes, bytearray, memoryview)):
         b = bytes(value)
     else:
-        raise TypeError(
-            f"expected str, bytes, bytearray, or memoryview, got {type(value).__name__}"
-        )
+        raise TypeError(f"expected str, bytes, bytearray, or memoryview, got {type(value).__name__}")
     if len(b) != 32:
         raise ValueError(f"hash32 must be 32 bytes, got {len(b)}")
     return Hash32(b)

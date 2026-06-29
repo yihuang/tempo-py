@@ -41,6 +41,8 @@ from .transaction import (
     serialize_for_signing,
     sign_transaction,
     verify_fee_payer_signature,
+)
+from .transaction import (
     verify_signature as verify_tx_signature,
 )
 from .types import (
