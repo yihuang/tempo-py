@@ -6,7 +6,7 @@ from typing import Optional
 
 import attrs
 
-from .constants import DEFAULT_CHAIN_ID, DEFAULT_NONCE_KEY
+from .constants import DEFAULT_CHAIN_ID
 from .types import (
     Address,
     BytesLike,

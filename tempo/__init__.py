@@ -9,29 +9,11 @@ Core modules:
 - ``tempo.types`` — ``Address``, ``Hash32``, type coercion helpers
 - ``tempo.constants`` — chain IDs, RPC URLs, token/precompile addresses
 - ``tempo.signer`` — ``Signer``, ``recover_address``, ``verify_signature``
-- ``tempo.transaction`` — RLP serialization, signing helpers, ``Builder``, TIP-20 encoding
-- ``tempo.client`` — JSON-RPC client for Tempo
+- ``tempo.transaction`` — RLP serialization, signing helpers, ``Builder``
 - ``tempo.keychain`` — access key models (``KeyRestrictions``, ``KeyAuthorization``, ``CallScope``)
-- ``tempo.contracts`` — typed call builders for TIP-20, AccountKeychain, etc.
-
-Quick start::
-
-    from tempo import TempoTransaction, Call, Signer
-    from tempo.constants import CHAIN_ID_MODERATO
-
-    tx = TempoTransaction.create(
-        chain_id=CHAIN_ID_MODERATO,
-        gas_limit=100_000,
-        calls=(Call.create(to="0x..."),),
-    )
-    signer = Signer("0x...")
-    signed = sign_transaction(tx, signer)
-    ...
-
-The Go SDK is at https://github.com/tempoxyz/tempo-go
+- ``tempo.contracts`` — ``Contract.from_abi()`` instances + typed call builders
 """
 
-from .client import Client, JSONRPCError
 from .constants import (
     CHAIN_ID_DEVNET,
     CHAIN_ID_MAINNET,
@@ -108,9 +90,6 @@ __all__ = [
     "get_fee_payer_sign_payload",
     "verify_tx_signature",
     "verify_fee_payer_signature",
-    # Client
-    "Client",
-    "JSONRPCError",
     # Constants
     "CHAIN_ID_MAINNET",
     "CHAIN_ID_MODERATO",

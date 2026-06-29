@@ -7,23 +7,20 @@ spending limits, call scoping, and authorization embedded in transactions.
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import Any, Optional
+from typing import Optional
 
 import attrs
-from eth_utils import keccak, to_bytes
+from eth_utils import keccak
 
-from .models import SECP256K1_HALF_N, SECP256K1_N, Signature, TempoTransaction
+from .models import Signature, TempoTransaction
 from .signer import Signer
-from .transaction import get_sign_payload, serialize_for_signing
+from .transaction import get_sign_payload
 from .contracts.tip20 import TIP20
 from .types import (
     Address,
     BytesLike,
-    Selector,
     as_address,
     as_bytes,
-    as_selector,
-    to_checksum_str,
     validate_nonempty_address,
 )
 
