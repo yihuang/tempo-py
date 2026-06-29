@@ -10,8 +10,8 @@ scopes (set_allowed_calls with many rules) use the same Contract directly.
 
 from eth_contract import Contract
 
+from ..constants import ACCOUNT_KEYCHAIN_ADDRESS
 from ..models import Call
-from .addresses import ACCOUNT_KEYCHAIN_ADDRESS
 
 # ---------------------------------------------------------------------------
 # Global Contract instance — shared, reusable, public

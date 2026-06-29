@@ -4,7 +4,7 @@ Provides typed helper classes that return :class:`~tempo.models.Call` objects
 ready to use in a :class:`~tempo.models.TempoTransaction`.
 """
 
-from .addresses import (
+from ..constants import (
     ACCOUNT_KEYCHAIN_ADDRESS,
     ALPHA_USD,
     BETA_USD,
