@@ -261,16 +261,26 @@ def add_fee_payer_signature(tx: TempoTransaction, fee_payer: Signer) -> TempoTra
 def verify_signature(tx: TempoTransaction) -> Address:
     """Recover and return the sender address from a signed transaction.
 
+    For a keychain-signed transaction the inner signature is recovered over
+    the Keychain V2 domain-separated hash; the recovered key must be the
+    access key, and the returned sender is the root account it signed for.
+
     Raises:
         ValueError: If transaction has no signature or recovery fails.
     """
     if tx.sender_signature is None:
         raise ValueError("transaction has no sender signature")
 
+    from .keychain import KeychainSignature
     from .signer import recover_address
 
     hash_signed = get_sign_payload(tx)
-    return recover_address(hash_signed, tx.sender_signature)
+    sig = tx.sender_signature
+    if isinstance(sig, KeychainSignature):
+        # Recovery validates the inner signature; the tx sender is the root.
+        recover_address(KeychainSignature.signing_hash(hash_signed, sig.user_address), sig.inner_signature)
+        return sig.user_address
+    return recover_address(hash_signed, sig)
 
 
 def verify_fee_payer_signature(tx: TempoTransaction, sender: BytesLike) -> Address:
