@@ -97,17 +97,11 @@ def _encode_fee_payer_field(tx: TempoTransaction) -> object:
     return b""
 
 
-def _encode_fee_token(tx: TempoTransaction, for_signing: bool) -> bytes:
-    """Encode the fee_token field.
-
-    Per Tempo spec: fee_token is skipped (0x80) in the sender's signing payload
-    when a fee payer is involved. It's always included for final broadcast.
-    """
-    if for_signing and tx.awaiting_fee_payer:
+def _encode_fee_token(tx: TempoTransaction, skip: bool) -> bytes:
+    """Encode field 10 (feeToken), or empty (0x80) when skipped."""
+    if skip or tx.fee_token is None:
         return b""
-    if tx.fee_token is not None:
-        return bytes(tx.fee_token)
-    return b""
+    return bytes(tx.fee_token)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +117,11 @@ def serialize_for_signing(tx: TempoTransaction) -> str:
     - feePayerSignatureOrSender uses 0x00 marker if awaiting_fee_payer
     - All signatures are removed
     """
-    fields = _build_rlp_fields(tx, for_signing=True, drop_signatures=True)
+    # Skipped once a fee payer is involved so the sender never commits to a
+    # fee token. Upstream keys this on fee_payer_signature.is_some():
+    # https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/primitives/src/transaction/tempo_transaction.rs#L755
+    skip_fee_token = tx.awaiting_fee_payer or tx.fee_payer_signature is not None
+    fields = _build_rlp_fields(tx, skip_fee_token=skip_fee_token, drop_signatures=True)
     encoded = rlp.encode(fields)
     return "0x76" + encoded.hex()
 
@@ -132,28 +130,26 @@ def serialize_for_fee_payer_signing(tx: TempoTransaction, sender: BytesLike) -> 
     """Serialize for fee payer signing (0x78 prefix).
 
     Strips BOTH sender and fee payer signatures, encodes sender address
-    in the feePayerSignatureOrSender field.
+    in the feePayerSignatureOrSender field. The fee payer commits to fee_token,
+    so it is never skipped here (unlike the sender's payload):
+    https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/primitives/src/transaction/tempo_transaction.rs#L401
     """
-    sender_addr = as_address(sender)
-    fields = _build_rlp_fields(tx, for_signing=True, drop_signatures=True)
-
-    # Override field 11 with sender address (fee payer format)
-    fields[11] = bytes(sender_addr)
-
+    fields = _build_rlp_fields(tx, skip_fee_token=False, drop_signatures=True)
+    fields[11] = bytes(as_address(sender))
     encoded = rlp.encode(fields)
     return "0x78" + encoded.hex()
 
 
 def serialize(tx: TempoTransaction) -> str:
     """Serialize a fully-signed transaction for broadcast (0x76 prefix)."""
-    fields = _build_rlp_fields(tx, for_signing=False, drop_signatures=False)
+    fields = _build_rlp_fields(tx, skip_fee_token=False, drop_signatures=False)
     encoded = rlp.encode(fields)
     return "0x76" + encoded.hex()
 
 
 def _build_rlp_fields(
     tx: TempoTransaction,
-    for_signing: bool,
+    skip_fee_token: bool,
     drop_signatures: bool,
 ) -> list:
     """Build the RLP field list for a TempoTransaction.
@@ -186,7 +182,7 @@ def _build_rlp_fields(
         _int_to_rlp_bytes(tx.nonce),
         _int_to_rlp_bytes(tx.valid_before or 0),
         _int_to_rlp_bytes(tx.valid_after or 0),
-        _encode_fee_token(tx, for_signing),
+        _encode_fee_token(tx, skip_fee_token),
         _encode_fee_payer_field(tx),
         [],  # authorizationList (reserved, empty)
     ]

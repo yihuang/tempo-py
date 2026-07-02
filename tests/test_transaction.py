@@ -81,6 +81,37 @@ class TestSerialization:
         ser = serialize_for_fee_payer_signing(signed_by_sender, signer.address)
         assert ser.startswith("0x78")
 
+    def test_fee_payer_payload_includes_fee_token(self):
+        import rlp
+
+        from tempo.transaction import serialize_for_fee_payer_signing
+
+        tx = _make_tx(awaiting_fee_payer=True, fee_token=ALPHA_USD)
+        signer = Signer(TEST_PK)
+        signed = sign_transaction(tx, signer)
+
+        sender_fields = rlp.decode(bytes.fromhex(serialize_for_signing(signed).removeprefix("0x76")))
+        fee_payer_fields = rlp.decode(
+            bytes.fromhex(serialize_for_fee_payer_signing(signed, signer.address).removeprefix("0x78"))
+        )
+
+        assert sender_fields[10] == b""
+        assert fee_payer_fields[10] == bytes.fromhex(ALPHA_USD.removeprefix("0x"))
+
+    def test_sender_payload_skips_fee_token_once_fee_payer_signed(self):
+        # An attached fee payer sig skips fee_token even with awaiting_fee_payer
+        # unset, matching upstream's fee_payer_signature.is_some() rule.
+        import rlp
+
+        tx = _make_tx(awaiting_fee_payer=False, fee_token=ALPHA_USD)
+        signed = sign_transaction(tx, Signer(TEST_PK))
+        final = add_fee_payer_signature(signed, Signer(FEE_PAYER_PK))
+        assert not final.awaiting_fee_payer
+        assert final.fee_payer_signature is not None
+
+        sender_fields = rlp.decode(bytes.fromhex(serialize_for_signing(final).removeprefix("0x76")))
+        assert sender_fields[10] == b""
+
     def test_signed_tx_hex_length(self):
         tx = _make_tx()
         signed = sign_transaction(tx, Signer(TEST_PK))
@@ -243,7 +274,7 @@ class TestPayload:
 # ---------------------------------------------------------------------------
 
 
-def _make_tx(awaiting_fee_payer: bool = False) -> TempoTransaction:
+def _make_tx(awaiting_fee_payer: bool = False, fee_token=None) -> TempoTransaction:
     return TempoTransaction.create(
         chain_id=CHAIN_ID_MODERATO,
         gas_limit=100_000,
@@ -252,5 +283,6 @@ def _make_tx(awaiting_fee_payer: bool = False) -> TempoTransaction:
         nonce=0,
         nonce_key=0,
         awaiting_fee_payer=awaiting_fee_payer,
+        fee_token=fee_token,
         calls=(Call.create(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 10**18).data),),
     )
