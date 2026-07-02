@@ -6,8 +6,6 @@ from eth_utils import keccak
 
 from tempo import Call, Signer, TempoTransaction
 from tempo.constants import ALPHA_USD, CHAIN_ID_MODERATO
-from tempo.constants import PK_0 as ROOT_PK
-from tempo.constants import PK_1 as ACCESS_PK
 from tempo.contracts import TIP20
 from tempo.keychain import (
     KEYCHAIN_SIGNATURE_TYPE,
@@ -25,6 +23,8 @@ from tempo.models import Signature
 from tempo.signer import recover_address
 from tempo.transaction import get_sign_payload, verify_signature
 from tempo.types import as_address
+from tests.constants import PK_0 as ROOT_PK
+from tests.constants import PK_1 as ACCESS_PK
 
 RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 KEY_ID = "0xaaaaaaaa00000000000000000000000000000000"

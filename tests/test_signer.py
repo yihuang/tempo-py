@@ -2,9 +2,9 @@
 
 from eth_utils import keccak
 
-from tempo.constants import PK_0 as TEST_PK
-from tempo.constants import PK_1 as TEST_PK_2
 from tempo.signer import Signer, recover_address, verify_signature
+from tests.constants import PK_0 as TEST_PK
+from tests.constants import PK_1 as TEST_PK_2
 
 # Anvil/Hardhat test account #0
 TEST_ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
