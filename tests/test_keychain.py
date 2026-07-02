@@ -1,7 +1,16 @@
 """Tests for tempo.keychain — access key models and key authorization."""
 
-from tempo.constants import ALPHA_USD
+import rlp
+from eth_account import Account
+from eth_utils import keccak
+
+from tempo import Call, Signer, TempoTransaction
+from tempo.constants import ALPHA_USD, CHAIN_ID_MODERATO
+from tempo.constants import PK_0 as ROOT_PK
+from tempo.constants import PK_1 as ACCESS_PK
+from tempo.contracts import TIP20
 from tempo.keychain import (
+    KEYCHAIN_SIGNATURE_TYPE,
     CallScope,
     KeyAuthorization,
     KeychainSignature,
@@ -10,8 +19,10 @@ from tempo.keychain import (
     SignatureType,
     TokenLimit,
     build_keychain_signature,
+    sign_tx_access_key,
 )
 from tempo.models import Signature
+from tempo.transaction import get_sign_payload
 
 RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 KEY_ID = "0xaaaaaaaa00000000000000000000000000000000"
@@ -174,16 +185,6 @@ class TestKeyAuthorization:
         )
         assert len(ka.limits) == 1
 
-    def test_authorization_hash(self):
-        ka = KeyAuthorization(
-            key_id=KEY_ID,
-            account=ACCOUNT,
-            chain_id=42431,
-        )
-        h = ka.authorization_hash()
-        assert isinstance(h, bytes)
-        assert len(h) == 32
-
     def test_to_rlp(self):
         ka = KeyAuthorization(
             key_id=KEY_ID,
@@ -235,3 +236,90 @@ class TestKeychainConstants:
         assert KEYCHAIN_SIGNATURE_TYPE == 0x04
         assert KEYCHAIN_SIGNATURE_LENGTH == 86
         assert INNER_SIGNATURE_LENGTH == 65
+
+
+def _make_tx() -> TempoTransaction:
+    return TempoTransaction.create(
+        chain_id=CHAIN_ID_MODERATO,
+        gas_limit=100_000,
+        max_fee_per_gas=2_000_000_000,
+        max_priority_fee_per_gas=1_000_000_000,
+        nonce=0,
+        nonce_key=0,
+        calls=(Call.create(to=ALPHA_USD, data=TIP20.fns.transfer(RECIPIENT, 1000).data),),
+    )
+
+
+class TestKeyAuthorizationRlp:
+    def test_admin_to_rlp_is_canonical_trailing_form(self):
+        ka = KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1337, is_admin=True)
+        # [chain_id, key_type, key_id, expiry, limits, allowed_calls, witness, is_admin, account]
+        # trailing-canonical: absent middle optionals are explicit 0x80 (b""),
+        # is_admin is the marker 1, account is present.
+        assert ka.to_rlp() == [1337, 0, bytes(ka.key_id), b"", b"", b"", b"", 1, bytes(ka.account)]
+
+    def test_signature_hash_is_keccak_of_rlp(self):
+        ka = KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1337, is_admin=True)
+        assert ka.signature_hash() == keccak(rlp.encode(ka.to_rlp()))
+
+
+class TestKeychainSignatureV2:
+    def test_layout_type_byte_and_roundtrip(self):
+        inner = Signature(r=1, s=1, v=27)
+        ks = KeychainSignature.from_inner(inner, ACCOUNT)
+        raw = ks.to_bytes()
+        assert len(raw) == 86
+        assert raw[0] == KEYCHAIN_SIGNATURE_TYPE  # 0x04
+        assert bytes(ks.user_address) == bytes(build_keychain_signature(inner, ACCOUNT)[1:21])
+        assert ks.inner_signature == inner
+
+    def test_rejects_wrong_type_byte(self):
+        import pytest
+
+        bad = bytes([0x03]) + bytes(20) + bytes(65)
+        with pytest.raises(ValueError, match="type byte"):
+            KeychainSignature(raw=bad)
+
+
+class TestSignTxAccessKey:
+    def test_admin_access_key_matches_node_format(self):
+        from eth_utils import keccak as _keccak
+
+        root, access = Signer(ROOT_PK), Signer(ACCESS_PK)
+        signed = sign_tx_access_key(_make_tx(), ACCESS_PK, root, is_admin=True)
+
+        # key_authorization is a nested SignedKeyAuthorization: [auth, root_sig(65)]
+        assert isinstance(signed.key_authorization, list) and len(signed.key_authorization) == 2
+        auth_payload, root_sig_bytes = signed.key_authorization
+        assert auth_payload == [
+            CHAIN_ID_MODERATO,
+            int(SignatureType.SECP256K1),
+            bytes(access.address),
+            b"",
+            b"",
+            b"",
+            b"",
+            1,
+            bytes(root.address),
+        ]
+        assert len(root_sig_bytes) == 65
+
+        # root grant signature uses canonical v in {27, 28} and recovers to root
+        r = int.from_bytes(root_sig_bytes[:32], "big")
+        s = int.from_bytes(root_sig_bytes[32:64], "big")
+        v = root_sig_bytes[64]
+        assert v in (27, 28)
+        auth = KeyAuthorization(key_id=access.address, account=root.address, chain_id=CHAIN_ID_MODERATO, is_admin=True)
+        recovered_root = Account._recover_hash(auth.signature_hash(), vrs=(v, r, s))
+        assert bytes.fromhex(recovered_root[2:]) == bytes(root.address)
+
+        # sender signature is a Keychain V2 blob whose inner recovers to the access
+        # key over keccak256(0x04 || sig_hash || root)
+        ks = signed.sender_signature
+        assert isinstance(ks, KeychainSignature)
+        assert bytes(ks.user_address) == bytes(root.address)
+        sig_hash = get_sign_payload(signed)
+        effective = _keccak(bytes([KEYCHAIN_SIGNATURE_TYPE]) + sig_hash + bytes(root.address))
+        inner = ks.inner_signature
+        recovered_key = Account._recover_hash(effective, vrs=(inner.v, inner.r, inner.s))
+        assert bytes.fromhex(recovered_key[2:]) == bytes(access.address)

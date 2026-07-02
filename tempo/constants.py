@@ -44,3 +44,9 @@ VALIDATOR_CONFIG_ADDRESS = to_checksum_address("0xCccCcCCC0000000000000000000000
 ACCOUNT_KEYCHAIN_ADDRESS = to_checksum_address("0xaAAAaaAA00000000000000000000000000000000")
 SIGNATURE_VERIFIER_ADDRESS = to_checksum_address("0x5165300000000000000000000000000000000000")
 RECEIVE_POLICY_GUARD_ADDRESS = to_checksum_address("0xB10C000000000000000000000000000000000000")
+
+# ---------------------------------------------------------------------------
+# Well-known deterministic dev keys (anvil accounts #0 and #1) -- test use only
+# ---------------------------------------------------------------------------
+PK_0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+PK_1 = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
