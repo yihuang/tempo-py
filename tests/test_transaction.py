@@ -98,6 +98,20 @@ class TestSerialization:
         assert sender_fields[10] == b""
         assert fee_payer_fields[10] == bytes.fromhex(ALPHA_USD.removeprefix("0x"))
 
+    def test_sender_payload_skips_fee_token_once_fee_payer_signed(self):
+        # An attached fee payer sig skips fee_token even with awaiting_fee_payer
+        # unset, matching upstream's fee_payer_signature.is_some() rule.
+        import rlp
+
+        tx = _make_tx(awaiting_fee_payer=False, fee_token=ALPHA_USD)
+        signed = sign_transaction(tx, Signer(TEST_PK))
+        final = add_fee_payer_signature(signed, Signer(FEE_PAYER_PK))
+        assert not final.awaiting_fee_payer
+        assert final.fee_payer_signature is not None
+
+        sender_fields = rlp.decode(bytes.fromhex(serialize_for_signing(final).removeprefix("0x76")))
+        assert sender_fields[10] == b""
+
     def test_signed_tx_hex_length(self):
         tx = _make_tx()
         signed = sign_transaction(tx, Signer(TEST_PK))
