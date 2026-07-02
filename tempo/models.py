@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import attrs
 
 from .constants import DEFAULT_CHAIN_ID
+
+if TYPE_CHECKING:
+    from .keychain import KeychainSignature
 from .types import (
     Address,
     BytesLike,
@@ -137,6 +140,15 @@ class Signature:
     def to_bytes(self) -> bytes:
         return self.r.to_bytes(32, "big") + self.s.to_bytes(32, "big") + bytes([self.v])
 
+    def to_canonical_bytes(self) -> bytes:
+        """65 bytes with v canonicalized to {27, 28}.
+
+        The node re-encodes embedded secp256k1 signatures with ``v = 27 +
+        y_parity`` when recomputing signing hashes and canonical tx bytes, so
+        signatures embedded inside payloads must use this form.
+        """
+        return self.r.to_bytes(32, "big") + self.s.to_bytes(32, "big") + bytes([27 + self.y_parity])
+
     def to_rlp_list(self) -> list:
         """Return [y_parity, r, s] for RLP encoding (fee_payer_signature)."""
         return [self.y_parity, self.r, self.s]
@@ -203,8 +215,8 @@ class TempoTransaction:
 
     fee_token: Optional[Address] = attrs.field(default=None, converter=as_optional_address)
 
-    # Signature fields
-    sender_signature: Optional[Signature] = None
+    # Signature fields (a keychain-signed tx carries a KeychainSignature envelope)
+    sender_signature: Optional[Signature | KeychainSignature] = None
     fee_payer_signature: Optional[Signature] = None
     awaiting_fee_payer: bool = False
 

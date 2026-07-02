@@ -10,6 +10,7 @@ from enum import IntEnum
 from typing import Optional
 
 import attrs
+import rlp
 from eth_utils import keccak
 
 from .contracts.tip20 import TIP20
@@ -21,6 +22,7 @@ from .types import (
     BytesLike,
     as_address,
     as_bytes,
+    as_optional_address,
     validate_nonempty_address,
 )
 
@@ -31,11 +33,13 @@ from .types import (
 KEYCHAIN_SIGNATURE_TYPE = 0x04
 """Byte identifying a Keychain V2 signature in the transaction envelope."""
 
-KEYCHAIN_SIGNATURE_LENGTH = 86
-"""Total byte length of a Keychain V2 signature (inner --- address --- type)."""
-
 INNER_SIGNATURE_LENGTH = 65
 """Byte length of the inner secp256k1 signature (r || s || v)."""
+
+KEYCHAIN_SIGNATURE_LENGTH = 1 + 20 + INNER_SIGNATURE_LENGTH
+"""Total byte length of a Keychain V2 signature: type(1) || address(20) || inner(65)."""
+
+_INNER_OFFSET = KEYCHAIN_SIGNATURE_LENGTH - INNER_SIGNATURE_LENGTH  # 21
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +91,14 @@ class TokenLimit:
         return cls(token=token, limit=limit, period=period)
 
     def to_rlp(self) -> list:
-        """Encode to an RLP-friendly list ``[token, limit, period]``."""
+        """Encode to ``[token, limit, period?]``.
+
+        The node wire form is trailing-canonical with ``period:
+        Option<NonZeroU64>``: period 0 must be omitted (a trailing ``0x80``
+        placeholder is rejected as a zero ``NonZeroU64``).
+        """
+        if self.period == 0:
+            return [bytes(self.token), self.limit]
         return [bytes(self.token), self.limit, self.period]
 
 
@@ -149,6 +160,20 @@ class CallScope:
             for r in v
         ),
     )
+
+    def to_rlp(self) -> list:
+        """Encode to the node wire form ``[target, [selector_rule, ...]]``.
+
+        The wire has no top-level selector: empty ``selector_rules`` means the
+        key may call ANY function on the target, so a plain ``selector`` (from
+        ``transfer()``/``approve()``/``with_selector()``) is folded into a
+        single rule; only the zero selector (``unrestricted()``) encodes no
+        rules.
+        """
+        rules = self.selector_rules
+        if not rules and self.selector != _ZERO_SELECTOR:
+            rules = (SelectorRule(selector=self.selector, recipients=()),)
+        return [bytes(self.target), [r.to_rlp() for r in rules]]
 
     @classmethod
     def transfer(cls, token: Address) -> CallScope:
@@ -294,90 +319,96 @@ class KeyAuthorization:
     """Transaction-embedded key authorization provisioned by a root account.
 
     Attributes:
-        chain_id: Chain where this authorization is valid.
+        chain_id: Chain where this authorization is valid (must match the
+            target chain; the node rejects mismatches).
         key_type: Type of the access key (``SignatureType``).
         key_id: The access key's address (20 bytes) or public key hash.
-        expiry: Unix timestamp when this authorization expires.
-        limits: Per-token spending limits (``TokenLimit`` list).
-        allowed_calls: List of allowed call scopes.
-        witness: Root-account signature over the authorization payload.
-        is_admin: Whether this key has unrestricted admin access.
-        account: The root account that granted this authorization.
+        expiry: Unix timestamp when this authorization expires (0 = never).
+        limits: Per-token spending limits. ``None`` = unlimited spending,
+            ``()`` = deny all spending.
+        allowed_calls: Allowed call scopes. ``None`` = unrestricted calls,
+            ``()`` = deny all calls.
+        witness: Optional 32-byte TIP-1053 witness (empty = none). The root
+            grant signature does NOT go here; it rides separately in the
+            ``SignedKeyAuthorization`` wrapper.
+        is_admin: Whether this key has unrestricted admin access. Admin keys
+            must not carry expiry, limits, or call scopes.
+        account: The root account that granted this authorization
+            (``None`` = omitted; required for admin-signed grants).
+
+    For more info (KeyAuthorization signature_hash = keccak256(rlp), and
+    KeyAuthorizationWire trailing-canonical layout):
+    https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/primitives/src/transaction/key_authorization.rs#L316
     """
 
     # Mandatory fields first (no defaults)
     key_id: Address = attrs.field(converter=as_address, validator=validate_nonempty_address)
-    account: Address = attrs.field(converter=as_address, validator=validate_nonempty_address)
+    chain_id: int = attrs.field(validator=attrs.validators.instance_of(int))
 
     # Fields with defaults
-    chain_id: int = 0
+    account: Address | None = attrs.field(default=None, converter=as_optional_address)
     key_type: int = SignatureType.SECP256K1
     expiry: int = 0
-    limits: tuple[TokenLimit, ...] = attrs.field(
-        factory=tuple,
-        converter=lambda v: tuple(
-            t if isinstance(t, TokenLimit) else TokenLimit.create(**t)  # type: ignore[arg-type]
-            for t in v
+    limits: tuple[TokenLimit, ...] | None = attrs.field(
+        default=None,
+        converter=lambda v: (
+            v
+            if v is None
+            else tuple(
+                t if isinstance(t, TokenLimit) else TokenLimit.create(**t)  # type: ignore[arg-type]
+                for t in v
+            )
         ),
     )
-    allowed_calls: tuple[CallScope, ...] = attrs.field(
-        factory=tuple,
-        converter=lambda v: tuple(
-            c if isinstance(c, CallScope) else CallScope(**c)  # type: ignore[arg-type]
-            for c in v
+    allowed_calls: tuple[CallScope, ...] | None = attrs.field(
+        default=None,
+        converter=lambda v: (
+            v
+            if v is None
+            else tuple(
+                c if isinstance(c, CallScope) else CallScope(**c)  # type: ignore[arg-type]
+                for c in v
+            )
         ),
     )
     witness: bytes = attrs.field(factory=bytes, converter=as_bytes)
     is_admin: bool = False
 
+    def __attrs_post_init__(self) -> None:
+        if self.witness and len(self.witness) != 32:
+            raise ValueError(f"witness must be 32 bytes when set, got {len(self.witness)}")
+        if self.is_admin and (self.expiry or self.limits is not None or self.allowed_calls is not None):
+            # Mirrors the node: "admin key authorizations cannot carry expiry,
+            # limits, or call scopes".
+            raise ValueError("admin KeyAuthorization must not set expiry, limits, or allowed_calls")
+
     def to_rlp(self) -> list:
-        """Encode to an RLP-friendly list for embedding in a transaction.
+        """Encode to the node's canonical trailing-form RLP list.
 
-        The list omits ``witness`` for signing, but includes it for the final
-        payload.  Callers should pass the result of ``to_rlp_signing()`` when
-        computing the witness hash and ``to_rlp()`` for the final transaction.
+        Wire order (the node uses ``#[rlp(trailing(canonical))]``)::
+
+            [chain_id, key_type, key_id, expiry?, limits?, allowed_calls?,
+             witness?, is_admin?, account?]
+
+        Absent trailing optionals are omitted; an absent optional that precedes
+        a present later field is emitted as an empty string (``0x80``).
         """
-        return [
-            self.chain_id,
-            self.key_type,
-            bytes(self.key_id),
-            self.expiry,
-            [t.to_rlp() for t in self.limits],
-            [c.to_rlp() for c in self.allowed_calls],
-            self.witness,
-            1 if self.is_admin else 0,
-            bytes(self.account),
+        head: list = [self.chain_id, int(self.key_type), bytes(self.key_id)]
+        optionals: list = [
+            self.expiry or None,
+            [t.to_rlp() for t in self.limits] if self.limits is not None else None,
+            [c.to_rlp() for c in self.allowed_calls] if self.allowed_calls is not None else None,
+            bytes(self.witness) if self.witness else None,
+            1 if self.is_admin else None,
+            bytes(self.account) if self.account is not None else None,
         ]
+        last = max((i for i, v in enumerate(optionals) if v is not None), default=-1)
+        head.extend(v if v is not None else b"" for v in optionals[: last + 1])
+        return head
 
-    def to_rlp_signing(self) -> list:
-        """Encode without the ``witness`` field for signing."""
-        return [
-            self.chain_id,
-            self.key_type,
-            bytes(self.key_id),
-            self.expiry,
-            [t.to_rlp() for t in self.limits],
-            [c.to_rlp() for c in self.allowed_calls],
-            1 if self.is_admin else 0,
-            bytes(self.account),
-        ]
-
-    def authorization_hash(self) -> bytes:
-        """Compute keccak256 hash of the ABI-encoded authorization fields.
-
-        This is the payload the root account signs to produce the *witness*.
-        """
-        raw = _abi_encode_authorization(
-            chain_id=self.chain_id,
-            key_type=self.key_type,
-            key_id=bytes(self.key_id),
-            expiry=self.expiry,
-            limits=self.limits,
-            allowed_calls=self.allowed_calls,
-            is_admin=self.is_admin,
-            account=bytes(self.account),
-        )
-        return keccak(raw)
+    def signature_hash(self) -> bytes:
+        """keccak256 of the RLP-encoded authorization -- the payload the root signs."""
+        return keccak(rlp.encode(self.to_rlp()))
 
 
 # ---------------------------------------------------------------------------
@@ -391,12 +422,18 @@ class KeychainSignature:
 
     Layout (86 bytes)::
 
-        [0:65]   inner secp256k1 signature (r || s || v)
-        [65:85]  user address (20 bytes)
-        [85:86]  key type byte (0 = SECP256K1, 1 = P256, 2 = WEBAUTHN)
+        [0:1]    type byte (0x04 = Keychain V2)
+        [1:21]   root account address (20 bytes)
+        [21:86]  inner secp256k1 signature (r || s || v)
+
+    The access key signs ``keccak256(0x04 || sig_hash || root_account)``; the
+    ``0x04`` domain separator prevents cross-scheme signature confusion.
 
     Attributes:
         raw: Full 86-byte keychain signature blob.
+
+    For more info (Keychain V2 signature):
+    https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/primitives/src/transaction/tt_signature.rs#L514
     """
 
     raw: bytes = attrs.field(converter=as_bytes)
@@ -404,121 +441,44 @@ class KeychainSignature:
     def __attrs_post_init__(self) -> None:
         if len(self.raw) != KEYCHAIN_SIGNATURE_LENGTH:
             raise ValueError(f"KeychainSignature must be {KEYCHAIN_SIGNATURE_LENGTH} bytes, got {len(self.raw)}")
+        if self.raw[0] != KEYCHAIN_SIGNATURE_TYPE:
+            raise ValueError(f"expected Keychain V2 type byte {KEYCHAIN_SIGNATURE_TYPE:#04x}, got {self.raw[0]:#04x}")
 
     @classmethod
     def from_inner(
         cls,
         inner_sig: Signature,
         user_address: BytesLike,
-        key_type: SignatureType = SignatureType.SECP256K1,
     ) -> KeychainSignature:
-        """Build from an inner secp256k1 signature and user address."""
-        raw = inner_sig.to_bytes()  # 65 bytes
-        raw += bytes(as_address(user_address))  # 20 bytes
-        raw += bytes([int(key_type)])  # 1 byte
+        """Build from the access key's inner signature and the root account address.
+
+        The inner signature is embedded with canonical v in {27, 28} so the
+        serialized transaction matches the node's re-encoded canonical bytes
+        (and therefore its tx hash).
+        """
+        raw = bytes([KEYCHAIN_SIGNATURE_TYPE]) + bytes(as_address(user_address)) + inner_sig.to_canonical_bytes()
         return cls(raw=raw)
 
-    @property
-    def inner_signature(self) -> Signature:
-        """Extract the 65-byte inner secp256k1 signature."""
-        raw = self.raw[:INNER_SIGNATURE_LENGTH]
-        r = int.from_bytes(raw[0:32], "big")
-        s = int.from_bytes(raw[32:64], "big")
-        v = raw[64]
-        return Signature(r=r, s=s, v=v)
+    @classmethod
+    def signing_hash(cls, sig_hash: bytes, user_address: BytesLike) -> bytes:
+        """The hash the access key signs: ``keccak256(0x04 || sig_hash || root)``."""
+        if len(sig_hash) != 32:
+            raise ValueError(f"sig_hash must be 32 bytes, got {len(sig_hash)}")
+        return keccak(bytes([KEYCHAIN_SIGNATURE_TYPE]) + sig_hash + bytes(as_address(user_address)))
 
     @property
     def user_address(self) -> Address:
-        """Extract the 20-byte user address."""
-        return Address(self.raw[INNER_SIGNATURE_LENGTH : INNER_SIGNATURE_LENGTH + 20])
+        """The root account the access key signed on behalf of (20 bytes)."""
+        return Address(self.raw[1:_INNER_OFFSET])
 
     @property
-    def key_type(self) -> SignatureType:
-        """Extract the key type byte."""
-        return SignatureType(self.raw[KEYCHAIN_SIGNATURE_LENGTH - 1])
+    def inner_signature(self) -> Signature:
+        """The 65-byte inner secp256k1 signature from the access key."""
+        return Signature.from_bytes(self.raw[_INNER_OFFSET:KEYCHAIN_SIGNATURE_LENGTH])
 
-    def to_rlp(self) -> bytes:
-        """Return raw bytes for RLP encoding."""
+    def to_bytes(self) -> bytes:
+        """Return the 86-byte blob (used as the transaction's sender signature)."""
         return self.raw
-
-
-# ---------------------------------------------------------------------------
-# ABI encoding helpers
-# ---------------------------------------------------------------------------
-
-
-def _pad32(data: bytes) -> bytes:
-    """Left-pad *data* to 32 bytes (zero padding for uint/int/address)."""
-    if len(data) > 32:
-        raise ValueError(f"data too long for _pad32: {len(data)} bytes")
-    return b"\x00" * (32 - len(data)) + data
-
-
-def _abi_encode_authorization(
-    *,
-    chain_id: int,
-    key_type: int,
-    key_id: bytes,
-    expiry: int,
-    limits: tuple[TokenLimit, ...],
-    allowed_calls: tuple[CallScope, ...],
-    is_admin: bool,
-    account: bytes,
-) -> bytes:
-    """Encode a key authorization for hashing using Solidity-style encoding.
-
-    Uses a simple concatenation + keccak scheme::
-
-        keccak(
-            abi.encode(chain_id, key_type, key_id, expiry, limits, allowed_calls, is_admin, account)
-        )
-
-    Since we avoid an ABI encoder dependency, we flatten the structure
-    following ABI encoding rules manually.
-    """
-    parts: list[bytes] = []
-
-    # Static head: chain_id, key_type, key_id, expiry
-    parts.append(_pad32(chain_id.to_bytes(32, "big")))
-    parts.append(_pad32(key_type.to_bytes(32, "big")))
-    parts.append(_pad32(key_id))  # address or hash → left-padded to 32
-    parts.append(_pad32(expiry.to_bytes(32, "big")))
-
-    # Dynamic: limits[] — at known offset (head is 8×32 = 256 bytes + 2 offsets)
-    # We skip complex ABI offset encoding and instead hash each array element
-    # separately, then hash the concatenation of hashes.
-    limit_hashes = b"".join(
-        keccak(_pad32(t.token) + _pad32(t.limit.to_bytes(32, "big")) + _pad32(t.period.to_bytes(32, "big")))
-        for t in limits
-    )
-    parts.append(_pad32(keccak(limit_hashes) if limit_hashes else bytes(32)))
-
-    # Dynamic: allowed_calls[]
-    call_hashes = b"".join(
-        keccak(_pad32(cs.target) + _pad32(cs.selector) + _encode_selector_rules(cs.selector_rules))
-        for cs in allowed_calls
-    )
-    parts.append(_pad32(keccak(call_hashes) if call_hashes else bytes(32)))
-
-    # Bool + address
-    parts.append(_pad32(bytes([1 if is_admin else 0])))
-    parts.append(_pad32(account))
-
-    return b"".join(parts)
-
-
-def _encode_selector_rules(rules: tuple[SelectorRule, ...]) -> bytes:
-    """Encode a list of SelectorRule for hashing."""
-    rule_hashes = b"".join(keccak(_pad32(r.selector) + _encode_address_array(r.recipients)) for r in rules)
-    return keccak(rule_hashes) if rule_hashes else bytes(32)
-
-
-def _encode_address_array(addrs: tuple[Address, ...]) -> bytes:
-    """Encode an address array for hashing."""
-    if not addrs:
-        return bytes(32)
-    packed = b"".join(_pad32(bytes(a)) for a in addrs)
-    return keccak(packed)
 
 
 # ---------------------------------------------------------------------------
@@ -526,89 +486,9 @@ def _encode_address_array(addrs: tuple[Address, ...]) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def build_keychain_signature(
-    inner_sig: Signature,
-    user_address: BytesLike,
-) -> bytes:
-    """Build a 86-byte Keychain V2 signature blob.
-
-    The returned byte string is ``r(32) || s(32) || v(1) || address(20) ||
-    key_type(1)`` suitable for embedding as a raw signature or RLP field.
-
-    Args:
-        inner_sig: The 65-byte secp256k1 signature (``Signature``).
-        user_address: The 20-byte address of the signer.
-
-    Returns:
-        86 bytes conforming to the Keychain V2 signature format.
-    """
-    sig_raw = inner_sig.to_bytes()  # 65 bytes
-    addr_raw = bytes(as_address(user_address))  # 20 bytes
-    return sig_raw + addr_raw + bytes([SignatureType.SECP256K1])
-
-
-# ---------------------------------------------------------------------------
-# Key authorization creation
-# ---------------------------------------------------------------------------
-
-
-def create_key_authorization(
-    *,
-    chain_id: int,
-    key_type: SignatureType = SignatureType.SECP256K1,
-    key_id: BytesLike,
-    expiry: int = 0,
-    limits: tuple[TokenLimit, ...] = (),
-    allowed_calls: tuple[CallScope, ...] = (),
-    witness: BytesLike = b"",
-    is_admin: bool = False,
-    account: BytesLike,
-) -> list:
-    """Create an RLP-encodable key authorization list for a transaction.
-
-    The returned list is suitable for passing as ``key_authorization`` to
-    :meth:`TempoTransaction.create` or the :class:`Builder`.
-
-    Example::
-
-        auth = create_key_authorization(
-            chain_id=CHAIN_ID_MODERATO,
-            key_id=access_key.address,
-            is_admin=True,
-            account=root_signer.address,
-        )
-        tx = TempoTransaction.create(key_authorization=auth, ...)
-
-    Args:
-        chain_id: Target chain ID.
-        key_type: Signature/access key type.
-        key_id: Access key address (20 bytes) or public key hash.
-        expiry: Unix timestamp when this authorization expires (0 = never).
-        limits: Per-token spending limits.
-        allowed_calls: Allowed call scopes.
-        witness: Root-account signature over the authorization (empty for
-            pre-signing construction; the caller should compute and set
-            this once the authorization is signed).
-        is_admin: Whether this key has unrestricted admin access.
-        account: The root account granting the authorization.
-
-    Returns:
-        An RLP-encodable list of the form
-        ``[chain_id, key_type, key_id, expiry, limits[], allowed_calls[],
-        witness, is_admin, account]``.
-    """
-    kw = KeyAuthorization(
-        chain_id=chain_id,
-        key_type=int(key_type),
-        key_id=key_id,
-        expiry=expiry,
-        limits=limits,
-        allowed_calls=allowed_calls,
-        witness=witness,
-        is_admin=is_admin,
-        account=account,
-    )
-    return kw.to_rlp()
+def build_keychain_signature(inner_sig: Signature, user_address: BytesLike) -> bytes:
+    """Build an 86-byte Keychain V2 blob (``0x04 || root(20) || inner(65)``)."""
+    return KeychainSignature.from_inner(inner_sig, user_address).to_bytes()
 
 
 # ---------------------------------------------------------------------------
@@ -625,20 +505,15 @@ def sign_tx_access_key(
     key_type: SignatureType = SignatureType.SECP256K1,
     key_id: Optional[BytesLike] = None,
     expiry: int = 0,
-    limits: tuple[TokenLimit, ...] = (),
-    allowed_calls: tuple[CallScope, ...] = (),
+    limits: tuple[TokenLimit, ...] | None = None,
+    allowed_calls: tuple[CallScope, ...] | None = None,
     is_admin: bool = True,
 ) -> TempoTransaction:
     """Sign a transaction with an access key, provisioning it inline.
 
-    This is a convenience that:
-
-    1. Creates a :class:`KeyAuthorization` describing what the access key
-       is allowed to do.
-    2. Signs the authorization with the *root_account* to produce a witness.
-    3. Signs the transaction payload with the access key.
-    4. Returns a fully-signed :class:`TempoTransaction` with both the
-       key authorization and the sender signature attached.
+    The *root_account* signs the ``KeyAuthorization`` (producing a
+    ``SignedKeyAuthorization``) and the access key signs the transaction as a
+    Keychain V2 signature, so the key is provisioned and used in one tx.
 
     Args:
         tx: Unsigned or partially-built transaction. Its ``key_authorization``
@@ -646,22 +521,30 @@ def sign_tx_access_key(
         access_key_sk: Hex-encoded private key of the access key (secp256k1).
         root_account: The root ``Signer`` that grants the authorization.
         chain_id: Chain ID (defaults to ``tx.chain_id``).
-        key_type: Type of the access key.
+        key_type: Type of the access key (only SECP256K1 is supported).
         key_id: Access key address (defaults to signing key's address).
-        expiry: Unix timestamp for expiry (0 = never).
-        limits: Per-token spending limits.
-        allowed_calls: Allowed call scopes.
+        expiry: Unix timestamp for expiry (0 = never; non-admin only).
+        limits: Per-token spending limits (``None`` = unlimited, ``()`` =
+            deny all spending; non-admin only).
+        allowed_calls: Allowed call scopes (``None`` = unrestricted, ``()`` =
+            deny all calls; non-admin only).
         is_admin: Whether the key has unrestricted admin access.
 
     Returns:
         A new ``TempoTransaction`` with ``key_authorization`` and
         ``sender_signature`` set.
+
+    For more info (same-transaction provision-and-use validation):
+    https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/revm/src/handler.rs#L1823
     """
+    if key_type != SignatureType.SECP256K1:
+        raise ValueError(f"only SECP256K1 access keys are supported, got {SignatureType(key_type).name}")
+
     access_key = Signer(access_key_sk)
     actual_chain_id = chain_id if chain_id is not None else tx.chain_id
     actual_key_id = as_address(key_id) if key_id is not None else access_key.address
+    root_addr = as_address(root_account.address)
 
-    # Build the unsigned authorization
     auth = KeyAuthorization(
         chain_id=actual_chain_id,
         key_type=int(key_type),
@@ -669,29 +552,21 @@ def sign_tx_access_key(
         expiry=expiry,
         limits=limits,
         allowed_calls=allowed_calls,
-        witness=b"",
         is_admin=is_admin,
-        account=root_account.address,
+        account=root_addr,
     )
 
-    # Root account signs the authorization hash → witness
-    auth_hash = auth.authorization_hash()
-    witness_sig = root_account.sign(auth_hash)
-    witness_bytes = witness_sig.to_bytes()
+    # SignedKeyAuthorization = [authorization, root_sig]. The node re-encodes
+    # embedded secp256k1 sigs with v in {27, 28} when recomputing hashes, so
+    # commit to the canonical form (else same-tx key recovery mismatches).
+    root_sig = root_account.sign(auth.signature_hash())
+    tx_with_auth = tx._replace_fields(key_authorization=[auth.to_rlp(), root_sig.to_canonical_bytes()])
 
-    # Create the final authorization with witness attached
-    signed_auth = attrs.evolve(auth, witness=witness_bytes)
-
-    # Attach authorization to the transaction, sign the tx payload
-    tx_with_auth = tx._replace_fields(
-        key_authorization=signed_auth.to_rlp(),
-    )
-
-    # Sign the transaction payload with the access key
-    payload_hash = get_sign_payload(tx_with_auth)
-    access_sig = access_key.sign(payload_hash)
+    # The access key signs the Keychain V2 domain-separated hash; the sender
+    # signature is the 0x04 || root || inner envelope.
+    inner_sig = access_key.sign(KeychainSignature.signing_hash(get_sign_payload(tx_with_auth), root_addr))
 
     return tx_with_auth._replace_fields(
-        sender_signature=access_sig,
-        sender_address=access_key.address,
+        sender_signature=KeychainSignature.from_inner(inner_sig, root_addr),
+        sender_address=root_addr,
     )
