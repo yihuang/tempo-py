@@ -4,8 +4,6 @@ import pytest
 
 from tempo import Call, Signer, TempoTransaction
 from tempo.constants import ACCOUNT_KEYCHAIN_ADDRESS, ALPHA_USD, CHAIN_ID_MODERATO
-from tempo.constants import PK_0 as TEST_PK
-from tempo.constants import PK_1 as FEE_PAYER_PK
 from tempo.contracts import TIP20
 from tempo.transaction import (
     Builder as TxBuilder,
@@ -22,6 +20,8 @@ from tempo.transaction import (
 from tempo.transaction import (
     verify_signature as verify_tx_sig,
 )
+from tests.constants import PK_0 as TEST_PK
+from tests.constants import PK_1 as FEE_PAYER_PK
 
 RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
