@@ -137,6 +137,12 @@ def serialize_for_fee_payer_signing(tx: TempoTransaction, sender: BytesLike) -> 
     sender_addr = as_address(sender)
     fields = _build_rlp_fields(tx, for_signing=True, drop_signatures=True)
 
+    # The fee payer commits to fee_token, so it is always included here
+    # (the sender's payload skips it while awaiting_fee_payer).
+    # https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/primitives/src/transaction/tempo_transaction.rs#L401
+    if tx.fee_token is not None:
+        fields[10] = bytes(as_address(tx.fee_token))
+
     # Override field 11 with sender address (fee payer format)
     fields[11] = bytes(sender_addr)
 
