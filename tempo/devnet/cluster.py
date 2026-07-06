@@ -1,17 +1,13 @@
-"""ClusterCLI — manage and interact with a tempo-devnet cluster.
+"""ClusterCLI — interact with a running tempo-devnet cluster.
 
-Provides the supervisord lifecycle (start/shutdown), access to the supervisor
-RPC interface, node status lookups, readiness waits, and convenience methods
-for querying a running cluster.
+Provides access to the supervisor RPC interface, node status lookups,
+and convenience methods for querying a running cluster. Running supervisord
+itself is left to the caller (the CLI ``start`` command, or a test harness
+managing its own child process).
 """
 
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
-import time
-import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,9 +16,6 @@ from supervisor.compat import xmlrpclib
 
 from .config import DevnetConfig
 from .ports import http_rpc_port
-
-_HEALTHY_STATES = {"RUNNING", "STARTING"}
-_CRASHED_STATES = {"FATAL", "EXITED"}
 
 
 def _find_validator_by_moniker(config: DevnetConfig, moniker: str) -> Optional[Any]:
@@ -59,7 +52,6 @@ class ClusterCLI:
         self.data_dir = Path(data_dir).resolve()
         self._config = config
         self._supervisor_proxy: Any = None
-        self._supervisord: subprocess.Popen | None = None
 
     @property
     def config(self) -> DevnetConfig:
@@ -78,85 +70,6 @@ class ClusterCLI:
                 }
                 self._config = DevnetConfig(raw)
         return self._config
-
-    # ------------------------------------------------------------------
-    # Supervisord lifecycle
-    # ------------------------------------------------------------------
-
-    def start_supervisord(self, *, log_path: str | Path | None = None) -> subprocess.Popen:
-        """Launch supervisord (nodaemon) for this cluster as a child process.
-
-        The programmatic counterpart of ``tempo-devnet start`` for embedding a
-        devnet in tests or scripts. Node logs go to each node's ``node.log``;
-        supervisord's own output goes to ``log_path`` (default:
-        ``data_dir/supervisord.out``).
-        """
-        from .supervisor import SUPERVISOR_CONFIG_FILE
-
-        ini = self.data_dir / SUPERVISOR_CONFIG_FILE
-        log = open(log_path or self.data_dir / "supervisord.out", "a")
-        self._supervisord = subprocess.Popen(
-            [sys.executable, "-m", "supervisor.supervisord", "-c", str(ini)],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
-        return self._supervisord
-
-    def wait_all_running(self, timeout: float = 30.0) -> None:
-        """Wait for the control socket, then for every node to launch."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                if all(p["statename"] in _HEALTHY_STATES for p in self.status()):
-                    return
-            except Exception:  # noqa: BLE001 - supervisord still booting
-                pass
-            time.sleep(0.5)
-        raise RuntimeError(f"supervisord did not start all nodes; see {self.data_dir}")
-
-    def wait_for_finalization(self, moniker: str = "node0", timeout: float = 120.0) -> None:
-        """Wait until ``moniker`` finalizes a block via consensus (not just produces one)."""
-        url = self.node_rpc_url(moniker)
-        deadline = time.time() + timeout
-        last_err: Exception | None = None
-        while time.time() < deadline:
-            crashed = [p["name"] for p in self.status() if p["statename"] in _CRASHED_STATES]
-            if crashed:
-                raise RuntimeError(f"validators crashed: {crashed}; see {self.data_dir}")
-            try:
-                finalized = (self._rpc(url, "consensus_getLatest") or {}).get("finalized")
-                height = int(self._rpc(url, "eth_blockNumber") or "0x0", 16)
-                if finalized and finalized.get("view", 0) >= 1 and height >= 1:
-                    return
-            except Exception as e:  # noqa: BLE001 - consensus warming up
-                last_err = e
-            time.sleep(1.0)
-        raise TimeoutError(f"consensus did not finalize within {timeout}s (last error: {last_err})")
-
-    def shutdown(self, timeout: float = 30.0) -> None:
-        """Stop all nodes and supervisord itself; reap the child if we spawned it."""
-        try:
-            self.supervisor.shutdown()
-        except Exception:  # noqa: BLE001 - socket already gone
-            if self._supervisord is not None:
-                self._supervisord.terminate()
-        finally:
-            self._supervisor_proxy = None
-        if self._supervisord is not None:
-            try:
-                self._supervisord.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                self._supervisord.kill()
-                self._supervisord.wait(timeout=10)
-            self._supervisord = None
-
-    @staticmethod
-    def _rpc(url: str, method: str, params: list | None = None) -> Any:
-        """A minimal JSON-RPC call (stdlib only, no web3 dependency)."""
-        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []})
-        req = urllib.request.Request(url, data=payload.encode(), headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.load(resp).get("result")
 
     # ------------------------------------------------------------------
     # Supervisor control
