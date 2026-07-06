@@ -28,13 +28,6 @@ Port scheme per node (base_port is auto-assigned or from config):
     ===================  ============  =======================
 """
 
-import os
-import tempfile
-
-if not os.environ.get("TMPDIR", "").startswith("/tmp"):
-    os.environ["TMPDIR"] = "/tmp"
-    tempfile.tempdir = "/tmp"
-
 from .cli import CLI
 from .cluster import ClusterCLI
 

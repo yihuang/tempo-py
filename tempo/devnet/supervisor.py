@@ -18,25 +18,6 @@ from .ports import (
 SUPERVISOR_CONFIG_FILE = "supervisord.ini"
 LOCALNET_SIGNING_KEY_SECRET = "tempo-localnet-signing-key-secret"
 
-# AF_UNIX socket paths are capped (~104 bytes on macOS, 108 on Linux).
-_MAX_SOCK_PATH = 100
-
-
-def supervisor_sock_path(data_dir: Path) -> Path:
-    """The cluster's control socket, next to its data (like pystarport).
-
-    The devnet package pins the tmpdir to /tmp on import so tmp-derived data
-    dirs stay short; an explicitly deep ``--data`` is rejected with a clear
-    error instead of supervisord's cryptic "AF_UNIX path too long".
-    """
-    sock = Path(data_dir) / "supervisor.sock"
-    if len(str(sock)) > _MAX_SOCK_PATH:
-        raise ValueError(
-            f"data dir too deep for the supervisor control socket ({len(str(sock))} > {_MAX_SOCK_PATH} bytes): "
-            f"{sock}. Use a shorter --data path."
-        )
-    return sock
-
 
 COMMON_PROG_OPTIONS: dict[str, str] = {
     "autostart": "true",
@@ -218,7 +199,7 @@ def generate_supervisor_config(
         "supervisor.rpcinterface_factory": "supervisor.rpcinterface:make_main_rpcinterface",
     }
 
-    sock = supervisor_sock_path(data_dir)
+    sock = data_dir / "supervisor.sock"
     ini.add_section("unix_http_server")
     ini["unix_http_server"] = {"file": str(sock)}
 

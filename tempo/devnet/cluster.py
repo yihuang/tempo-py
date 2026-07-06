@@ -79,12 +79,10 @@ class ClusterCLI:
     def supervisor(self) -> Any:
         """The supervisor XML-RPC proxy (lazy-init)."""
         if self._supervisor_proxy is None:
-            from .supervisor import supervisor_sock_path
-
             self._supervisor_proxy = xmlrpclib.ServerProxy(
                 "http://127.0.0.1",
                 transport=xmlrpc.SupervisorTransport(
-                    serverurl=f"unix://{supervisor_sock_path(self.data_dir)}",
+                    serverurl=f"unix://{self.data_dir / 'supervisor.sock'}",
                 ),
             )
         return self._supervisor_proxy.supervisor
