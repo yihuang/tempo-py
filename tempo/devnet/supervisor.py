@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import configparser
+import hashlib
+import tempfile
 from pathlib import Path
 
 from .config import DevnetConfig
@@ -17,6 +19,19 @@ from .ports import (
 
 SUPERVISOR_CONFIG_FILE = "supervisord.ini"
 LOCALNET_SIGNING_KEY_SECRET = "tempo-localnet-signing-key-secret"
+
+
+def supervisor_sock_path(data_dir: Path) -> Path:
+    """A short, per-cluster control-socket path in the system tmpdir.
+
+    AF_UNIX socket paths are capped (~104 bytes on macOS), so the socket cannot
+    live inside ``data_dir`` — a deep data directory (e.g. pytest tmp paths)
+    would make supervisord fail with "AF_UNIX path too long".
+    """
+    digest = hashlib.md5(str(Path(data_dir).resolve()).encode()).hexdigest()[:10]
+    return Path(tempfile.gettempdir()) / f"tempo-devnet-{digest}.sock"
+
+
 COMMON_PROG_OPTIONS: dict[str, str] = {
     "autostart": "true",
     "autorestart": "true",
@@ -197,11 +212,12 @@ def generate_supervisor_config(
         "supervisor.rpcinterface_factory": "supervisor.rpcinterface:make_main_rpcinterface",
     }
 
+    sock = supervisor_sock_path(data_dir)
     ini.add_section("unix_http_server")
-    ini["unix_http_server"] = {"file": f"{data_dir}/supervisor.sock"}
+    ini["unix_http_server"] = {"file": str(sock)}
 
     ini.add_section("supervisorctl")
-    ini["supervisorctl"] = {"serverurl": f"unix://{data_dir}/supervisor.sock"}
+    ini["supervisorctl"] = {"serverurl": f"unix://{sock}"}
 
     # Derive trusted peers from enode identity files
     peers = _trusted_peers(config, data_dir)

@@ -77,11 +77,12 @@ class ClusterCLI:
     def supervisor(self) -> Any:
         """The supervisor XML-RPC proxy (lazy-init)."""
         if self._supervisor_proxy is None:
-            sock_path = self.data_dir / "supervisor.sock"
+            from .supervisor import supervisor_sock_path
+
             self._supervisor_proxy = xmlrpclib.ServerProxy(
                 "http://127.0.0.1",
                 transport=xmlrpc.SupervisorTransport(
-                    serverurl=f"unix://{sock_path}",
+                    serverurl=f"unix://{supervisor_sock_path(self.data_dir)}",
                 ),
             )
         return self._supervisor_proxy.supervisor
@@ -93,7 +94,14 @@ class ClusterCLI:
             List of dicts with keys: ``name``, ``group``, ``state``,
             ``statename``, ``pid``, ``uptime_seconds``, ``description``.
         """
-        raw = self.supervisor.getAllProcessInfo()
+        try:
+            raw = self.supervisor.getAllProcessInfo()
+        except Exception:
+            # A request that failed mid-flight (e.g. supervisord still booting)
+            # leaves the cached transport unusable ("Request-sent"); drop it so
+            # the caller's retry reconnects cleanly.
+            self._supervisor_proxy = None
+            raise
         return list(raw)
 
     def start_node(self, moniker: str) -> bool:
