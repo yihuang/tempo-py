@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import configparser
-import hashlib
-import tempfile
 from pathlib import Path
 
 from .config import DevnetConfig
@@ -20,16 +18,24 @@ from .ports import (
 SUPERVISOR_CONFIG_FILE = "supervisord.ini"
 LOCALNET_SIGNING_KEY_SECRET = "tempo-localnet-signing-key-secret"
 
+# AF_UNIX socket paths are capped (~104 bytes on macOS, 108 on Linux).
+_MAX_SOCK_PATH = 100
+
 
 def supervisor_sock_path(data_dir: Path) -> Path:
-    """A short, per-cluster control-socket path in the system tmpdir.
+    """The cluster's control socket, next to its data (like pystarport).
 
-    AF_UNIX socket paths are capped (~104 bytes on macOS), so the socket cannot
-    live inside ``data_dir`` — a deep data directory (e.g. pytest tmp paths)
-    would make supervisord fail with "AF_UNIX path too long".
+    The devnet package pins the tmpdir to /tmp on import so tmp-derived data
+    dirs stay short; an explicitly deep ``--data`` is rejected with a clear
+    error instead of supervisord's cryptic "AF_UNIX path too long".
     """
-    digest = hashlib.md5(str(Path(data_dir).resolve()).encode()).hexdigest()[:10]
-    return Path(tempfile.gettempdir()) / f"tempo-devnet-{digest}.sock"
+    sock = Path(data_dir) / "supervisor.sock"
+    if len(str(sock)) > _MAX_SOCK_PATH:
+        raise ValueError(
+            f"data dir too deep for the supervisor control socket ({len(str(sock))} > {_MAX_SOCK_PATH} bytes): "
+            f"{sock}. Use a shorter --data path."
+        )
+    return sock
 
 
 COMMON_PROG_OPTIONS: dict[str, str] = {
