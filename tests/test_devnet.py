@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import stat
 import tempfile
 from pathlib import Path
@@ -11,7 +12,9 @@ import yaml
 
 from tempo.devnet.config import DevnetConfig, ValidatorConfig
 from tempo.devnet.ports import (
+    PORTS_PER_NODE,
     authrpc_port,
+    find_free_base_ports,
     consensus_metrics_port,
     consensus_p2p_port,
     execution_p2p_port,
@@ -507,3 +510,18 @@ class TestClusterCLI:
             assert "8014" in cli.node_rpc_url("node1")
             assert "8005" in cli.node_ws_url("node0")
             assert "8015" in cli.node_ws_url("node1")
+
+
+class TestFindFreeBasePorts:
+    def test_returns_spaced_bindable_blocks(self):
+        bases = find_free_base_ports(4)
+        assert len(bases) == 4
+        assert all(bases[i + 1] - bases[i] == 10 for i in range(3))  # default stride
+        # every derived service port in every block is currently bindable
+        for base in bases:
+            for offset in range(PORTS_PER_NODE):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(("127.0.0.1", base + offset))
+
+    def test_blocks_stay_under_the_port_ceiling(self):
+        assert max(find_free_base_ports(4)) + PORTS_PER_NODE < 65536
