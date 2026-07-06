@@ -91,7 +91,7 @@ tempo-devnet status --data ./data
 
 # Supervisor control
 tempo-devnet supervisorctl status
-tempo-devnet supervisorctl tail node-127.0.0.1:8000
+tempo-devnet supervisorctl tail node-1
 ```
 
 ### Port Scheme
