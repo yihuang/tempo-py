@@ -139,23 +139,27 @@ class TestDevnetConfig:
         assert cfg.validators[1].moniker == "beta"
 
     def test_validators_arg(self) -> None:
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "10.0.0.1", "port": 9000},
-                {"host": "10.0.0.2", "port": 9001},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "10.0.0.1", "port": 9000},
+                    {"host": "10.0.0.2", "port": 9001},
+                ],
+            }
+        )
         assert cfg.validators_arg == "10.0.0.1:9000,10.0.0.2:9001"
 
     def test_to_genesis_args(self) -> None:
-        cfg = DevnetConfig({
-            "chain_id": 1337,
-            "accounts": 5000,
-            "epoch_length": 200,
-            "gas_limit": 100_000_000,
-            "seed": 42,
-            "validators": [{"host": "127.0.0.1", "port": 8000}],
-        })
+        cfg = DevnetConfig(
+            {
+                "chain_id": 1337,
+                "accounts": 5000,
+                "epoch_length": 200,
+                "gas_limit": 100_000_000,
+                "seed": 42,
+                "validators": [{"host": "127.0.0.1", "port": 8000}],
+            }
+        )
         args = cfg.to_genesis_args()
         assert "--chain-id" in args
         assert "1337" in args
@@ -165,10 +169,13 @@ class TestDevnetConfig:
 
     def test_load_yaml(self) -> None:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump({
-                "chain_id": 999,
-                "validators": [{"host": "10.0.0.1", "port": 9000}],
-            }, f)
+            yaml.dump(
+                {
+                    "chain_id": 999,
+                    "validators": [{"host": "10.0.0.1", "port": 9000}],
+                },
+                f,
+            )
             path = f.name
 
         try:
@@ -195,10 +202,12 @@ class TestDevnetConfig:
         assert len(cfg1.validators) == len(cfg2.validators)
 
     def test_hardfork_timestamps(self) -> None:
-        cfg = DevnetConfig({
-            "t1_time": 100,
-            "t6_time": 200,
-        })
+        cfg = DevnetConfig(
+            {
+                "t1_time": 100,
+                "t6_time": 200,
+            }
+        )
         assert cfg.t1_time == 100
         assert cfg.t6_time == 200
         assert cfg.t0_time == 0  # default
@@ -340,13 +349,15 @@ class TestSupervisorConfig:
     """Supervisor config file generation."""
 
     def test_generate_config(self) -> None:
-        cfg = DevnetConfig({
-            "chain_id": 1337,
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-                {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "chain_id": 1337,
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
@@ -397,11 +408,13 @@ class TestSupervisorConfig:
                 assert "'--consensus.secret'" in script_content
 
     def test_node_logging_in_config(self) -> None:
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
@@ -427,12 +440,14 @@ class TestClusterCLI:
     def test_node_dirs_by_moniker(self) -> None:
         from tempo.devnet.cluster import ClusterCLI
 
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-                {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
@@ -449,11 +464,13 @@ class TestClusterCLI:
     def test_rpc_urls_by_moniker(self) -> None:
         from tempo.devnet.cluster import ClusterCLI
 
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "alice"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "alice"},
+                ],
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
@@ -470,12 +487,14 @@ class TestClusterCLI:
     def test_rpc_urls_by_moniker_lookup(self) -> None:
         from tempo.devnet.cluster import ClusterCLI
 
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-                {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
