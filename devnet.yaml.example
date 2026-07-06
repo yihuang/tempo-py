@@ -1,0 +1,73 @@
+# tempo-devnet configuration
+# ==========================
+# Copy and customize this file to run a local multi-node Tempo testnet.
+#
+# Usage:
+#   tempo-devnet serve --data ./data --config ./devnet.yaml
+
+# Chain ID (default: 1337)
+chain_id: 1337
+
+# Number of prefunded accounts (default: 10000)
+accounts: 10000
+
+# Epoch length in blocks (default: 100)
+epoch_length: 100
+
+# Block gas limit (default: 500000000)
+gas_limit: 500000000
+
+# Mnemonic for deterministic account generation
+# (default: "test test test test test test test test test test test junk")
+mnemonic: "test test test test test test test test test test test junk"
+
+# Fixed seed for deterministic key generation (omit for random)
+seed: 42
+
+# Hardfork activation timestamps (Unix seconds; 0 = active at genesis)
+# t0_time: 0
+# t1_time: 0
+# t2_time: 0
+# t3_time: 0
+# t4_time: 0
+# t5_time: 0
+# t6_time: 0
+# t7_time: 0
+# t8_time: 0
+
+# Disable initial DKG in genesis (for dev mode)
+# no_dkg_in_genesis: false
+
+# Disable creating Alpha/Beta/ThetaUSD tokens
+# no_extra_tokens: false
+
+# Disable minting pairwise FeeAMM liquidity
+# no_pairwise_liquidity: false
+
+# Path to the tempo binary (default: "tempo")
+# tempo_bin: tempo
+
+# Path to the tempo-xtask binary (default: "tempo-xtask")
+# tempo_xtask_bin: tempo-xtask
+
+# Validator definitions
+# Each validator gets a base_port. Service ports are derived as:
+#   +0 consensus P2P (--consensus.listen-address)
+#   +1 execution P2P (--port / --discovery.port)
+#   +2 consensus metrics (--consensus.metrics-address)
+#   +3 engine API authrpc (--authrpc.port)
+#   +4 HTTP JSON-RPC (--http.port)
+#   +5 WebSocket (--ws.port)
+validators:
+  - host: 127.0.0.1
+    port: 8000
+    moniker: node0
+  - host: 127.0.0.1
+    port: 8010
+    moniker: node1
+  - host: 127.0.0.1
+    port: 8020
+    moniker: node2
+  - host: 127.0.0.1
+    port: 8030
+    moniker: node3

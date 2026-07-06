@@ -13,11 +13,35 @@ dependencies = [
     "eth-contract>=0.4.1",
 ]
 
+[project.urls]
+homepage = "https://github.com/yihuang/tempo-py"
+repository = "https://github.com/yihuang/tempo-py"
+
+[project.scripts]
+tempo-devnet = "tempo.devnet.cli:main"
+
+[project.optional-dependencies]
+devnet = [
+    "pyyaml>=6.0",
+    "supervisor>=4.2",
+    "fire>=0.7.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.15.20",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tempo"]
+
+[tool.uv]
+package = true
 
 [tool.ruff]
 target-version = "py313"
@@ -25,6 +49,3 @@ line-length = 120
 
 [tool.ruff.format]
 quote-style = "double"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I"]

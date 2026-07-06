@@ -12,6 +12,7 @@ Core modules:
 - ``tempo.transaction`` — RLP serialization, signing helpers, ``Builder``
 - ``tempo.keychain`` — access key models (``KeyRestrictions``, ``KeyAuthorization``, ``CallScope``)
 - ``tempo.contracts`` — ``Contract.from_abi()`` instances + typed call builders
+- ``tempo.devnet`` — Multi-node testnet generator (like pystarport) + supervisord management
 """
 
 from .constants import (
