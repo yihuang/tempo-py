@@ -722,22 +722,26 @@ class TestDockerCompose:
 
     def test_default_image(self) -> None:
         """Default Docker image points to the official Tempo container."""
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+            }
+        )
         assert cfg.docker_image == "ghcr.io/tempoxyz/tempo:latest"
         assert cfg.docker_network == "tempo-devnet"
 
     def test_generates_yaml(self) -> None:
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-                {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
-            ],
-            "docker": {"image": "tempo:test", "network": "test-net"},
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+                "docker": {"image": "tempo:test", "network": "test-net"},
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
@@ -767,12 +771,14 @@ class TestDockerCompose:
             assert "--consensus.signing-key" not in content
 
     def test_docker_node_command_uses_container_paths(self) -> None:
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-                {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
@@ -793,7 +799,7 @@ class TestDockerCompose:
             assert "./enode.key" in cmd
             # All containers use the same fixed internal ports
             assert "0.0.0.0:8000" in cmd  # consensus P2P
-            assert "--port 8001" in cmd    # execution P2P
+            assert "--port 8001" in cmd  # execution P2P
             assert "--authrpc.port 8003" in cmd
             assert "--http.port 8004" in cmd
             assert "--ws.port 8005" in cmd
@@ -822,11 +828,13 @@ class TestDockerCompose:
 
     def test_docker_integration(self) -> None:
         """generate_docker_compose writes docker-run.sh per validator."""
-        cfg = DevnetConfig({
-            "validators": [
-                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
-            ],
-        })
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+            }
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
@@ -845,7 +853,7 @@ class TestDockerCompose:
             assert script.stat().st_mode & stat.S_IXUSR
             content = script.read_text()
             assert "(docker)" in content
-            assert 'exec' in content
+            assert "exec" in content
 
 
 class TestFindFreeBasePorts:
