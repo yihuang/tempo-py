@@ -7,7 +7,6 @@ spending limits, call scoping, and authorization embedded in transactions.
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import Optional
 
 import attrs
 import rlp
@@ -501,9 +500,9 @@ def sign_tx_access_key(
     access_key_sk: str,
     root_account: Signer,
     *,
-    chain_id: Optional[int] = None,
+    chain_id: int | None = None,
     key_type: SignatureType = SignatureType.SECP256K1,
-    key_id: Optional[BytesLike] = None,
+    key_id: BytesLike | None = None,
     expiry: int = 0,
     limits: tuple[TokenLimit, ...] | None = None,
     allowed_calls: tuple[CallScope, ...] | None = None,

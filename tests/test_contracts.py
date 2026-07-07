@@ -27,44 +27,44 @@ KEY_ID = "0xaaaaaaaa00000000000000000000000000000000"
 
 
 class TestTIP20ContractDirect:
-    def test_transfer_calldata(self):
+    def test_transfer_calldata(self) -> None:
         data = TIP20.fns.transfer(RECIPIENT, 10**18).data
         assert data[:4] == bytes(TIP20.fns.transfer.selector)
         assert len(data) == 68
 
-    def test_approve_calldata(self):
+    def test_approve_calldata(self) -> None:
         data = TIP20.fns.approve(RECIPIENT, 10**18).data
         assert data[:4] == bytes(TIP20.fns.approve.selector)
 
-    def test_transfer_with_memo(self):
+    def test_transfer_with_memo(self) -> None:
         data = TIP20.fns.transferWithMemo(RECIPIENT, 10**18, b"\x00" * 32).data
         assert data[:4] == bytes(TIP20.fns.transferWithMemo.selector)
 
-    def test_burn_calldata(self):
+    def test_burn_calldata(self) -> None:
         data = TIP20.fns.burn(1000).data
         assert data[:4] == bytes(TIP20.fns.burn.selector)
 
-    def test_mint_calldata(self):
+    def test_mint_calldata(self) -> None:
         data = TIP20.fns.mint(RECIPIENT, 10**18).data
         assert data[:4] == bytes(TIP20.fns.mint.selector)
 
-    def test_pause_unpause(self):
+    def test_pause_unpause(self) -> None:
         assert TIP20.fns.pause().data[:4] == bytes(TIP20.fns.pause.selector)
         assert TIP20.fns.unpause().data[:4] == bytes(TIP20.fns.unpause.selector)
 
 
 class TestTIP20RolesContract:
-    def test_grant_role(self):
+    def test_grant_role(self) -> None:
         role = b"\x00" * 32
         data = TIP20_ROLES.fns.grantRole(role, RECIPIENT).data
         assert data[:4] == bytes(TIP20_ROLES.fns.grantRole.selector)
 
-    def test_revoke_role(self):
+    def test_revoke_role(self) -> None:
         role = b"\x00" * 32
         data = TIP20_ROLES.fns.revokeRole(role, RECIPIENT).data
         assert data[:4] == bytes(TIP20_ROLES.fns.revokeRole.selector)
 
-    def test_renounce_role(self):
+    def test_renounce_role(self) -> None:
         role = b"\x00" * 32
         data = TIP20_ROLES.fns.renounceRole(role).data
         assert data[:4] == bytes(TIP20_ROLES.fns.renounceRole.selector)
@@ -76,12 +76,12 @@ class TestTIP20RolesContract:
 
 
 class TestAccountKeychainDirect:
-    def test_revoke_key(self):
+    def test_revoke_key(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.revokeKey(KEY_ID).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.revokeKey.selector)
         assert len(data) == 36
 
-    def test_authorize_key_simple(self):
+    def test_authorize_key_simple(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.authorizeKey(
             KEY_ID,
             0,
@@ -89,7 +89,7 @@ class TestAccountKeychainDirect:
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeKey.selector)
 
-    def test_authorize_key_with_limits(self):
+    def test_authorize_key_with_limits(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.authorizeKey(
             KEY_ID,
             0,
@@ -97,7 +97,7 @@ class TestAccountKeychainDirect:
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeKey.selector)
 
-    def test_update_spending_limit(self):
+    def test_update_spending_limit(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.updateSpendingLimit(
             KEY_ID,
             ALPHA_USD,
@@ -105,7 +105,7 @@ class TestAccountKeychainDirect:
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.updateSpendingLimit.selector)
 
-    def test_authorize_admin_key(self):
+    def test_authorize_admin_key(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.authorizeAdminKey(
             KEY_ID,
             0,
@@ -113,18 +113,18 @@ class TestAccountKeychainDirect:
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeAdminKey.selector)
 
-    def test_burn_key_auth_witness(self):
+    def test_burn_key_auth_witness(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.burnKeyAuthorizationWitness(b"\x00" * 32).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.burnKeyAuthorizationWitness.selector)
 
-    def test_set_allowed_calls(self):
+    def test_set_allowed_calls(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.setAllowedCalls(
             KEY_ID,
             [(ALPHA_USD, [(bytes.fromhex("a9059cbb"), [RECIPIENT])])],
         ).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.setAllowedCalls.selector)
 
-    def test_remove_allowed_calls(self):
+    def test_remove_allowed_calls(self) -> None:
         data = ACCOUNT_KEYCHAIN.fns.removeAllowedCalls(KEY_ID, ALPHA_USD).data
         assert data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.removeAllowedCalls.selector)
 
@@ -135,12 +135,12 @@ class TestAccountKeychainDirect:
 
 
 class TestAccountKeychainWrapper:
-    def test_authorize_key(self):
+    def test_authorize_key(self) -> None:
         call = AccountKeychain.authorize_key(key_id=KEY_ID, signature_type=0)
         assert isinstance(call, Call)
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeKey.selector)
 
-    def test_authorize_key_with_limits(self):
+    def test_authorize_key_with_limits(self) -> None:
         call = AccountKeychain.authorize_key(
             key_id=KEY_ID,
             signature_type=0,
@@ -151,11 +151,11 @@ class TestAccountKeychainWrapper:
         )
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeKey.selector)
 
-    def test_revoke_key(self):
+    def test_revoke_key(self) -> None:
         call = AccountKeychain.revoke_key(key_id=KEY_ID)
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.revokeKey.selector)
 
-    def test_update_spending_limit(self):
+    def test_update_spending_limit(self) -> None:
         call = AccountKeychain.update_spending_limit(
             key_id=KEY_ID,
             token=ALPHA_USD,
@@ -163,7 +163,7 @@ class TestAccountKeychainWrapper:
         )
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.updateSpendingLimit.selector)
 
-    def test_authorize_admin_key(self):
+    def test_authorize_admin_key(self) -> None:
         call = AccountKeychain.authorize_admin_key(
             key_id=KEY_ID,
             signature_type=0,
@@ -171,22 +171,22 @@ class TestAccountKeychainWrapper:
         )
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.authorizeAdminKey.selector)
 
-    def test_set_allowed_calls(self):
+    def test_set_allowed_calls(self) -> None:
         call = AccountKeychain.set_allowed_calls(
             key_id=KEY_ID,
             scopes=[(ALPHA_USD, [(bytes.fromhex("a9059cbb"), [RECIPIENT])])],
         )
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.setAllowedCalls.selector)
 
-    def test_remove_allowed_calls(self):
+    def test_remove_allowed_calls(self) -> None:
         call = AccountKeychain.remove_allowed_calls(key_id=KEY_ID, target=ALPHA_USD)
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.removeAllowedCalls.selector)
 
-    def test_burn_key_auth_witness(self):
+    def test_burn_key_auth_witness(self) -> None:
         call = AccountKeychain.burn_key_auth_witness(witness=b"\x00" * 32)
         assert call.data[:4] == bytes(ACCOUNT_KEYCHAIN.fns.burnKeyAuthorizationWitness.selector)
 
-    def test_address_constant(self):
+    def test_address_constant(self) -> None:
         assert AccountKeychain.ADDRESS == ACCOUNT_KEYCHAIN_ADDRESS
 
 
@@ -196,12 +196,12 @@ class TestAccountKeychainWrapper:
 
 
 class TestContractConsistency:
-    def test_tip20_selector_consistency(self):
+    def test_tip20_selector_consistency(self) -> None:
         cs = CallScope.transfer("0x" + "20" * 20)
         assert cs.selector == bytes(TIP20.fns.transfer.selector)
 
-    def test_instance_sharing(self):
+    def test_instance_sharing(self) -> None:
         assert TIP20 is TIP20_VIA_TIP20
 
-    def test_keychain_instance_sharing(self):
+    def test_keychain_instance_sharing(self) -> None:
         assert ACCOUNT_KEYCHAIN is ACCOUNT_KEYCHAIN_VIA_KEYCHAIN

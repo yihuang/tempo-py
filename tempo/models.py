@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import attrs
 
@@ -210,23 +210,23 @@ class TempoTransaction:
     nonce_key: int = 0
     nonce: int = 0
 
-    valid_before: Optional[int] = None
-    valid_after: Optional[int] = None
+    valid_before: int | None = None
+    valid_after: int | None = None
 
-    fee_token: Optional[Address] = attrs.field(default=None, converter=as_optional_address)
+    fee_token: Address | None = attrs.field(default=None, converter=as_optional_address)
 
     # Signature fields (a keychain-signed tx carries a KeychainSignature envelope)
-    sender_signature: Optional[Signature | KeychainSignature] = None
-    fee_payer_signature: Optional[Signature] = None
+    sender_signature: Signature | KeychainSignature | None = None
+    fee_payer_signature: Signature | None = None
     awaiting_fee_payer: bool = False
 
-    sender_address: Optional[Address] = attrs.field(default=None, converter=as_optional_address)
+    sender_address: Address | None = attrs.field(default=None, converter=as_optional_address)
 
     # Authorization list (reserved for EIP-7702)
     tempo_authorization_list: tuple[bytes, ...] = attrs.field(factory=tuple)
 
     # Key authorization (inline access key provisioning)
-    key_authorization: Optional[object] = None  # SignedKeyAuthorization from keychain module
+    key_authorization: object | None = None  # SignedKeyAuthorization from keychain module
 
     # ------------------------------------------------------------------
     # Factory methods
@@ -242,14 +242,14 @@ class TempoTransaction:
         max_priority_fee_per_gas: int = 0,
         nonce: int = 0,
         nonce_key: int = 0,
-        valid_before: Optional[int] = None,
-        valid_after: Optional[int] = None,
-        fee_token: Optional[BytesLike] = None,
+        valid_before: int | None = None,
+        valid_after: int | None = None,
+        fee_token: BytesLike | None = None,
         awaiting_fee_payer: bool = False,
         calls: tuple[Call, ...] = (),
         access_list: tuple[AccessListItem, ...] = (),
         tempo_authorization_list: tuple[BytesLike, ...] = (),
-        key_authorization: Optional[object] = None,
+        key_authorization: object | None = None,
     ) -> TempoTransaction:
         """Create a transaction with automatic type coercion."""
         auth_list = tuple(as_bytes(x) for x in tempo_authorization_list)

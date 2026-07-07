@@ -1,6 +1,6 @@
 """Type definitions and coercion helpers for Tempo transactions."""
 
-from typing import NewType, Optional, Union
+from typing import NewType
 
 from eth_utils import to_bytes, to_checksum_address
 
@@ -8,7 +8,7 @@ Address = NewType("Address", bytes)
 Hash32 = NewType("Hash32", bytes)
 Selector = NewType("Selector", bytes)
 
-BytesLike = Union[bytes, str, bytearray, memoryview]
+BytesLike = bytes | str | bytearray | memoryview
 
 
 def as_bytes(value: BytesLike) -> bytes:
@@ -46,7 +46,7 @@ def as_address(value: BytesLike) -> Address:
     return Address(b)
 
 
-def as_optional_address(value: Optional[BytesLike]) -> Optional[Address]:
+def as_optional_address(value: BytesLike | None) -> Address | None:
     """Convert to Address, treating empty/None as None."""
     if value is None:
         return None

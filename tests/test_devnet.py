@@ -29,11 +29,14 @@ from tempo.devnet.ports import (
 from tempo.devnet.supervisor import (
     LOCALNET_SIGNING_KEY_SECRET,
     apply_genesis_patch,
+    generate_docker_compose,
     generate_supervisor_config,
+    write_docker_run_script,
     write_run_script,
     write_reth_config,
     write_secret_file,
     _build_node_args,
+    _docker_node_command,
     _sh_quote,
 )
 
@@ -235,6 +238,8 @@ class TestBuildNodeArgs:
     def test_returns_list(self) -> None:
         args = _build_node_args(
             tempo_bin="tempo",
+            p2p_host="127.0.0.1",
+            rpc_host="0.0.0.0",
             host="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
@@ -252,6 +257,8 @@ class TestBuildNodeArgs:
     def test_port_values(self) -> None:
         args = _build_node_args(
             tempo_bin="tempo",
+            p2p_host="127.0.0.1",
+            rpc_host="0.0.0.0",
             host="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
@@ -278,6 +285,8 @@ class TestBuildNodeArgs:
     def test_uses_secret_file(self) -> None:
         args = _build_node_args(
             tempo_bin="tempo",
+            p2p_host="127.0.0.1",
+            rpc_host="0.0.0.0",
             host="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
@@ -292,6 +301,34 @@ class TestBuildNodeArgs:
         assert "/d/.secret" in args
         assert "<(" not in args
 
+    def test_p2p_and_rpc_hosts_in_args(self) -> None:
+        """p2p_host controls consensus listen-address; rpc_host controls http/ws bind."""
+        args = _build_node_args(
+            tempo_bin="tempo",
+            p2p_host="10.0.1.2",
+            rpc_host="0.0.0.0",
+            host="10.0.1.2",
+            base_port=8000,
+            genesis_path="/g.json",
+            datadir="/d",
+            signing_key="/d/signing.key",
+            signing_share="/d/signing.share",
+            secret_file="/d/.secret",
+            enode_key="/d/enode.key",
+            trusted_peers=[],
+        )
+        # P2P listens on p2p_host
+        assert "--consensus.listen-address" in args
+        idx = args.index("--consensus.listen-address")
+        assert args[idx + 1] == "10.0.1.2:8000"
+        # HTTP/WS bind on rpc_host
+        assert "--http.addr" in args
+        idx = args.index("--http.addr")
+        assert args[idx + 1] == "0.0.0.0"
+        assert "--ws.addr" in args
+        idx = args.index("--ws.addr")
+        assert args[idx + 1] == "0.0.0.0"
+
 
 class TestWriteRunScript:
     """Wrapper script generation."""
@@ -302,6 +339,8 @@ class TestWriteRunScript:
             val_dir.mkdir(parents=True)
             node_args = _build_node_args(
                 tempo_bin="tempo",
+                p2p_host="127.0.0.1",
+                rpc_host="0.0.0.0",
                 host="127.0.0.1",
                 base_port=8000,
                 genesis_path="/g.json",
@@ -323,14 +362,12 @@ class TestWriteRunScript:
 
             # Check content
             content = script_path.read_text()
-            assert content.startswith("#!/usr/bin/env bash")
+            assert content.startswith("#!/bin/sh")
             assert "exec " in content
             assert "'tempo'" in content
             assert "'node'" in content
-            assert "'--consensus.secret'" in content
-            # Should use shell-quoted args
-            assert "set -o errexit" in content
-            assert "set -o nounset" in content
+            # multi-line: each arg on its own line with backslash continuation
+            assert "'--consensus.secret' \\" in content
 
     def test_arg_quoting(self) -> None:
         """Arguments with special chars are properly shell-quoted."""
@@ -588,6 +625,8 @@ class TestPatches:
     def test_extra_flags_in_node_args(self) -> None:
         args = _build_node_args(
             tempo_bin="tempo",
+            p2p_host="127.0.0.1",
+            rpc_host="0.0.0.0",
             host="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
@@ -659,9 +698,12 @@ class TestPatches:
 
             generate_supervisor_config(cfg, data_dir, force=True)
 
-            # Genesis patch applied
+            # Genesis patch applied (both root and per-node copy)
             genesis = json.loads((data_dir / "genesis.json").read_text())
             assert genesis["nonce"] == "0x42"
+            per_node_genesis = json.loads((val_dir / "genesis.json").read_text())
+            assert per_node_genesis["nonce"] == "0x42"
+            assert per_node_genesis["chain_id"] == 1337
 
             # Reth config written
             assert (val_dir / "reth.toml").exists()
@@ -675,8 +717,147 @@ class TestPatches:
             assert "'32'" in run_sh
 
 
+class TestDockerCompose:
+    """Docker Compose generation."""
+
+    def test_default_image(self) -> None:
+        """Default Docker image points to the official Tempo container."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+            }
+        )
+        assert cfg.docker_image == "ghcr.io/tempoxyz/tempo:latest"
+        assert cfg.docker_network == "tempo-devnet"
+
+    def test_generates_yaml(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+                "docker": {"image": "tempo:test", "network": "test-net"},
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            for val in cfg.validators:
+                d = data_dir / val.dir_name
+                d.mkdir(parents=True)
+                (d / "enode.identity").write_text("abc")
+                (d / "signing.key").write_text("k")
+                (d / "signing.share").write_text("s")
+                (d / "enode.key").write_text("e")
+            (data_dir / "genesis.json").write_text("{}")
+
+            dst = generate_docker_compose(cfg, data_dir, force=True)
+            assert dst.exists()
+            content = dst.read_text()
+            assert "tempo:test" in content
+            assert "test-net" in content
+            assert "node0" in content
+            assert "node1" in content
+            assert "bridge" in content
+            # RPC ports: host_port = base+offset, container port = fixed 8004
+            assert "8004:8004" in content  # node0: host=8004 → container=8004
+            assert "8014:8004" in content  # node1: host=8014 → container=8004
+            # Command references docker-run.sh wrapper, not inline tempo args
+            assert "/data/node0/docker-run.sh" in content
+            assert "/data/node1/docker-run.sh" in content
+            assert "--consensus.signing-key" not in content
+
+    def test_docker_node_command_uses_container_paths(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            for val in cfg.validators:
+                d = data_dir / val.dir_name
+                d.mkdir(parents=True)
+                (d / "enode.identity").write_text("abc")
+                (d / "signing.key").write_text("k")
+                (d / "signing.share").write_text("s")
+                (d / "enode.key").write_text("e")
+            (data_dir / "genesis.json").write_text("{}")
+
+            args = _docker_node_command(cfg, cfg.validators[0], data_dir)
+            cmd = " ".join(args)
+            # Paths are relative — docker-run.sh cds to /data/<moniker> first
+            assert "./genesis.json" in cmd
+            assert "./signing.key" in cmd
+            assert "./enode.key" in cmd
+            # All containers use the same fixed internal ports
+            assert "0.0.0.0:8000" in cmd  # consensus P2P
+            assert "--port 8001" in cmd  # execution P2P
+            assert "--authrpc.port 8003" in cmd
+            assert "--http.port 8004" in cmd
+            assert "--ws.port 8005" in cmd
+            # datadir is . (current dir after cd)
+            assert "--datadir ." in cmd
+            # Trusted-peers use Docker service names + fixed internal port
+            assert "@node1:8001" in cmd
+            # No bootnodes endpoint
+            assert "--tempo.bootnodes-endpoint" in cmd
+
+    def test_docker_run_script_all_args(self) -> None:
+        """write_docker_run_script produces an executable wrapper with container paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            val_dir = Path(tmpdir) / "node0"
+            val_dir.mkdir(parents=True)
+            args = ["tempo", "node", "--chain", "/data/node0/genesis.json", "--datadir", "/data/node0"]
+            script = write_docker_run_script(val_dir, args)
+            assert script == val_dir / "docker-run.sh"
+            assert script.exists()
+            assert script.stat().st_mode & stat.S_IXUSR
+            content = script.read_text()
+            assert "(docker)" in content
+            assert "exec" in content
+            assert 'cd "$(dirname "$0")"' in content
+            assert "tempo" in content
+
+    def test_docker_integration(self) -> None:
+        """generate_docker_compose writes docker-run.sh per validator."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            d = data_dir / "node0"
+            d.mkdir(parents=True)
+            (d / "enode.identity").write_text("abc")
+            (d / "signing.key").write_text("k")
+            (d / "signing.share").write_text("s")
+            (d / "enode.key").write_text("e")
+            (data_dir / "genesis.json").write_text("{}")
+
+            generate_docker_compose(cfg, data_dir, force=True)
+
+            script = data_dir / "node0" / "docker-run.sh"
+            assert script.exists()
+            assert script.stat().st_mode & stat.S_IXUSR
+            content = script.read_text()
+            assert "(docker)" in content
+            assert "exec" in content
+
+
 class TestFindFreeBasePorts:
-    def test_returns_spaced_bindable_blocks(self):
+    def test_returns_spaced_bindable_blocks(self) -> None:
         bases = find_free_base_ports(4)
         assert len(bases) == 4
         assert all(bases[i + 1] - bases[i] == 10 for i in range(3))  # default stride
@@ -686,5 +867,5 @@ class TestFindFreeBasePorts:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.bind(("127.0.0.1", base + offset))
 
-    def test_blocks_stay_under_the_port_ceiling(self):
+    def test_blocks_stay_under_the_port_ceiling(self) -> None:
         assert max(find_free_base_ports(4)) + PORTS_PER_NODE < 65536

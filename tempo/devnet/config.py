@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -18,7 +18,24 @@ DEFAULT_TEMPO_XTASK_BIN = "tempo-xtask"
 
 
 class ValidatorConfig:
-    """Configuration for a single validator node."""
+    """Configuration for a single validator node.
+
+    Attributes:
+        host: Advertised IP address used in ``--trusted-peers`` and
+            ``--consensus.metrics-address``.  Also used as the P2P listen
+            address unless ``p2p_host`` is explicitly set.
+        port: Consensus P2P port (``--consensus.listen-address``).
+            Service ports are derived from this as ``base_port``.
+        moniker: Node name (used as directory name and supervisor program).
+        base_port: Base port for all service port calculations.
+            Defaults to ``port`` (the consensus P2P port).
+        p2p_host: IP to bind the P2P listener (``--consensus.listen-address``).
+            Defaults to ``host``.  Set to ``0.0.0.0`` to make the validator
+            reachable from external networks.
+        rpc_host: IP to bind HTTP/WS JSON-RPC (``--http.addr`` / ``--ws.addr``).
+            Defaults to ``0.0.0.0`` (all interfaces) so external full nodes
+            can sync via ``--follow ws://<host>:<ws_port>``.
+    """
 
     def __init__(
         self,
@@ -26,12 +43,16 @@ class ValidatorConfig:
         host: str = "127.0.0.1",
         port: int,
         moniker: str = "",
-        base_port: Optional[int] = None,
+        base_port: int | None = None,
+        p2p_host: str | None = None,
+        rpc_host: str | None = None,
     ) -> None:
         self.host = host
         self.port = port
         self.moniker = moniker or f"node{port // 10 % 10}"
         self.base_port = base_port if base_port is not None else port
+        self.p2p_host = p2p_host if p2p_host is not None else host
+        self.rpc_host = rpc_host if rpc_host is not None else "0.0.0.0"
 
     @property
     def dir_name(self) -> str:
@@ -48,12 +69,17 @@ class ValidatorConfig:
         return f"{self.host}:{self.port}"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "host": self.host,
             "port": self.port,
             "moniker": self.moniker,
             "base_port": self.base_port,
         }
+        if self.p2p_host != self.host:
+            d["p2p_host"] = self.p2p_host
+        if self.rpc_host != "0.0.0.0":
+            d["rpc_host"] = self.rpc_host
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ValidatorConfig:
@@ -62,19 +88,21 @@ class ValidatorConfig:
             port=d.get("port", d.get("base_port", 8000)),
             moniker=d.get("moniker", ""),
             base_port=d.get("base_port"),
+            p2p_host=d.get("p2p_host"),
+            rpc_host=d.get("rpc_host"),
         )
 
 
 class DevnetConfig:
     """Complete devnet configuration loaded from a YAML file."""
 
-    def __init__(self, data: dict[str, Any], source: Optional[Path] = None) -> None:
+    def __init__(self, data: dict[str, Any], source: Path | None = None) -> None:
         self._source = source
         self.chain_id: int = data.get("chain_id", DEFAULT_CHAIN_ID)
         self.accounts: int = data.get("accounts", DEFAULT_ACCOUNTS)
         self.epoch_length: int = data.get("epoch_length", DEFAULT_EPOCH_LENGTH)
         self.gas_limit: int = data.get("gas_limit", DEFAULT_GAS_LIMIT)
-        self.seed: Optional[int] = data.get("seed")
+        self.seed: int | None = data.get("seed")
         self.mnemonic: str = data.get("mnemonic", DEFAULT_MNEMONIC)
         self.tempo_bin: str = data.get("tempo_bin", DEFAULT_TEMPO_BIN)
         self.tempo_xtask_bin: str = data.get("tempo_xtask_bin", DEFAULT_TEMPO_XTASK_BIN)
@@ -101,6 +129,13 @@ class DevnetConfig:
         if not isinstance(patch_node_flags, list) or any(not isinstance(x, str) for x in patch_node_flags):
             raise TypeError("patch_node_flags must be a list of strings")
         self.patch_node_flags: list[str] = patch_node_flags
+
+        # Docker settings
+        docker_raw = data.get("docker") or {}
+        if not isinstance(docker_raw, dict):
+            raise TypeError("docker must be a mapping (dict)")
+        self.docker_image: str = docker_raw.get("image", "ghcr.io/tempoxyz/tempo:latest")
+        self.docker_network: str = docker_raw.get("network", "tempo-devnet")
         # Parse validators
         raw_validators = data.get("validators", [])
         if not raw_validators:
@@ -185,4 +220,8 @@ class DevnetConfig:
             d["patch_reth"] = self.patch_reth
         if self.patch_node_flags:
             d["patch_node_flags"] = self.patch_node_flags
+        d["docker"] = {
+            "image": self.docker_image,
+            "network": self.docker_network,
+        }
         return d

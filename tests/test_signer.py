@@ -14,16 +14,16 @@ TEST_ADDR_2 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 
 class TestSigner:
-    def test_address(self):
+    def test_address(self) -> None:
         signer = Signer(TEST_PK)
         addr = "0x" + signer.address.hex()
         assert addr.lower() == TEST_ADDR.lower()
 
-    def test_checksum_address(self):
+    def test_checksum_address(self) -> None:
         signer = Signer(TEST_PK)
         assert signer.checksum_address == TEST_ADDR
 
-    def test_sign_and_recover(self):
+    def test_sign_and_recover(self) -> None:
         signer = Signer(TEST_PK)
         msg_hash = keccak(b"hello")
         sig = signer.sign(msg_hash)
@@ -32,20 +32,20 @@ class TestSigner:
         recovered_hex = "0x" + recovered.hex()
         assert recovered_hex.lower() == TEST_ADDR.lower()
 
-    def test_verify_signature(self):
+    def test_verify_signature(self) -> None:
         signer = Signer(TEST_PK)
         msg_hash = keccak(b"test message")
         sig = signer.sign(msg_hash)
         assert signer.verify_signature(msg_hash, sig)
 
-    def test_verify_signature_wrong_signer(self):
+    def test_verify_signature_wrong_signer(self) -> None:
         signer = Signer(TEST_PK)
         signer2 = Signer(TEST_PK_2)
         msg_hash = keccak(b"test")
         sig = signer.sign(msg_hash)
         assert not signer2.verify_signature(msg_hash, sig)
 
-    def test_sign_data(self):
+    def test_sign_data(self) -> None:
         signer = Signer(TEST_PK)
         sig = signer.sign_data(b"arbitrary data")
         msg_hash = keccak(b"arbitrary data")
@@ -53,13 +53,13 @@ class TestSigner:
         recovered_hex = "0x" + recovered.hex()
         assert recovered_hex.lower() == TEST_ADDR.lower()
 
-    def test_private_key_without_0x_prefix(self):
+    def test_private_key_without_0x_prefix(self) -> None:
         signer = Signer(TEST_PK[2:])  # strip 0x
         assert signer.checksum_address == TEST_ADDR
 
 
 class TestRecoverAddress:
-    def test_recover_valid(self):
+    def test_recover_valid(self) -> None:
         signer = Signer(TEST_PK)
         msg_hash = keccak(b"hello")
         sig = signer.sign(msg_hash)
@@ -67,14 +67,14 @@ class TestRecoverAddress:
         assert "0x" + addr.hex() == TEST_ADDR.lower()  # checksum differs on case
         assert addr.hex() == bytes.fromhex(TEST_ADDR[2:]).hex()
 
-    def test_recover_fee_payer(self):
+    def test_recover_fee_payer(self) -> None:
         signer = Signer(TEST_PK_2)
         msg_hash = keccak(b"fee payer message")
         sig = signer.sign(msg_hash)
         addr = recover_address(msg_hash, sig)
         assert addr.hex() == bytes.fromhex(TEST_ADDR_2[2:]).hex()
 
-    def test_verify_signature_function(self):
+    def test_verify_signature_function(self) -> None:
         signer = Signer(TEST_PK)
         msg_hash = keccak(b"verify me")
         sig = signer.sign(msg_hash)

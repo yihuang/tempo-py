@@ -9,6 +9,7 @@ scopes (set_allowed_calls with many rules) use the same Contract directly.
 """
 
 from eth_contract import Contract
+from web3 import Web3
 
 from ..constants import ACCOUNT_KEYCHAIN_ADDRESS
 from ..models import Call
@@ -72,13 +73,13 @@ def _build_restrictions_tuple(
     )
 
 
-def _scope_target(scope) -> str:
+def _scope_target(scope: object) -> str:
     if isinstance(scope, tuple):
         return scope[0]
     return scope.target if hasattr(scope, "target") else str(scope)
 
 
-def _scope_rules(scope) -> list:
+def _scope_rules(scope: object) -> list:
     if isinstance(scope, tuple):
         return list(scope[1]) if len(scope) > 1 else []
     return list(getattr(scope, "selector_rules", []))
@@ -207,14 +208,14 @@ class AccountKeychain:
         return Call.create(to=ACCOUNT_KEYCHAIN_ADDRESS, data=data)
 
     @staticmethod
-    def is_admin_key(w3, *, account: str, key_id: str) -> bool:
+    def is_admin_key(w3: Web3, *, account: str, key_id: str) -> bool:
         """Query ``isAdminKey(address,address)`` (read-only, needs Web3)."""
         fn = ACCOUNT_KEYCHAIN.fns.isAdminKey(account, key_id)
         raw = w3.eth.call({"to": ACCOUNT_KEYCHAIN_ADDRESS, "data": fn.data})
         return fn.decode(raw)
 
     @staticmethod
-    def is_key_auth_witness_burned(w3, *, account: str, witness: bytes) -> bool:
+    def is_key_auth_witness_burned(w3: Web3, *, account: str, witness: bytes) -> bool:
         """Query ``isKeyAuthorizationWitnessBurned(address,bytes32)`` (read-only)."""
         fn = ACCOUNT_KEYCHAIN.fns.isKeyAuthorizationWitnessBurned(account, witness)
         raw = w3.eth.call({"to": ACCOUNT_KEYCHAIN_ADDRESS, "data": fn.data})

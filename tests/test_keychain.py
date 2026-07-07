@@ -39,12 +39,12 @@ ACCOUNT = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 
 class TestSignatureType:
-    def test_values(self):
+    def test_values(self) -> None:
         assert SignatureType.SECP256K1 == 0
         assert SignatureType.P256 == 1
         assert SignatureType.WEBAUTHN == 2
 
-    def test_int_enum(self):
+    def test_int_enum(self) -> None:
         assert int(SignatureType.SECP256K1) == 0
 
 
@@ -54,21 +54,21 @@ class TestSignatureType:
 
 
 class TestTokenLimit:
-    def test_create_basic(self):
+    def test_create_basic(self) -> None:
         tl = TokenLimit(token=ALPHA_USD, limit=10**18)
         assert tl.limit == 10**18
         assert tl.period == 0
 
-    def test_create_with_period(self):
+    def test_create_with_period(self) -> None:
         tl = TokenLimit(token=ALPHA_USD, limit=10**18, period=86400)
         assert tl.period == 86400
 
-    def test_to_rlp_omits_zero_period(self):
+    def test_to_rlp_omits_zero_period(self) -> None:
         # Node wire is trailing-canonical Option<NonZeroU64>: period 0 must be absent.
         tl = TokenLimit(token=ALPHA_USD, limit=10**18)
         assert tl.to_rlp() == [bytes.fromhex(ALPHA_USD[2:]), 10**18]
 
-    def test_to_rlp_keeps_nonzero_period(self):
+    def test_to_rlp_keeps_nonzero_period(self) -> None:
         tl = TokenLimit(token=ALPHA_USD, limit=10**18, period=86400)
         assert tl.to_rlp() == [bytes.fromhex(ALPHA_USD[2:]), 10**18, 86400]
 
@@ -79,19 +79,19 @@ class TestTokenLimit:
 
 
 class TestSelectorRule:
-    def test_create(self):
+    def test_create(self) -> None:
         sr = SelectorRule.create(selector=bytes.fromhex("a9059cbb"))
         assert len(sr.selector) == 4
         assert sr.recipients == ()
 
-    def test_create_with_recipients(self):
+    def test_create_with_recipients(self) -> None:
         sr = SelectorRule.create(
             selector=bytes.fromhex("a9059cbb"),
             recipients=(RECIPIENT,),
         )
         assert len(sr.recipients) == 1
 
-    def test_to_rlp(self):
+    def test_to_rlp(self) -> None:
         sr = SelectorRule.create(selector=bytes.fromhex("a9059cbb"))
         rlp = sr.to_rlp()
         assert len(rlp) == 2
@@ -103,37 +103,37 @@ class TestSelectorRule:
 
 
 class TestCallScope:
-    def test_transfer(self):
+    def test_transfer(self) -> None:
         cs = CallScope.transfer(ALPHA_USD)
         assert cs.selector == bytes.fromhex("a9059cbb")
         assert cs.target is not None
 
-    def test_approve(self):
+    def test_approve(self) -> None:
         cs = CallScope.approve(ALPHA_USD)
         assert cs.selector == bytes.fromhex("095ea7b3")
 
-    def test_unrestricted(self):
+    def test_unrestricted(self) -> None:
         cs = CallScope.unrestricted(target=RECIPIENT)
         assert cs.selector == bytes(4)
 
-    def test_with_selector(self):
+    def test_with_selector(self) -> None:
         cs = CallScope.with_selector(
             target=RECIPIENT,
             selector=bytes.fromhex("a9059cbb"),
         )
         assert cs.selector == bytes.fromhex("a9059cbb")
 
-    def test_to_rlp_folds_selector_into_rule(self):
+    def test_to_rlp_folds_selector_into_rule(self) -> None:
         # The wire has no top-level selector; empty rules would mean "any
         # function", so transfer() must encode a single-selector rule.
         cs = CallScope.transfer(ALPHA_USD)
         assert cs.to_rlp() == [bytes(cs.target), [[bytes.fromhex("a9059cbb"), []]]]
 
-    def test_to_rlp_unrestricted_has_no_rules(self):
+    def test_to_rlp_unrestricted_has_no_rules(self) -> None:
         cs = CallScope.unrestricted(target=RECIPIENT)
         assert cs.to_rlp() == [bytes(cs.target), []]
 
-    def test_to_rlp_explicit_rules_win(self):
+    def test_to_rlp_explicit_rules_win(self) -> None:
         rule = SelectorRule.create(selector=bytes.fromhex("a9059cbb"), recipients=(RECIPIENT,))
         cs = CallScope.with_selector(target=ALPHA_USD, selector=bytes.fromhex("a9059cbb"), selector_rules=(rule,))
         assert cs.to_rlp() == [bytes(cs.target), [[bytes.fromhex("a9059cbb"), [bytes(as_address(RECIPIENT))]]]]
@@ -145,26 +145,26 @@ class TestCallScope:
 
 
 class TestKeyRestrictions:
-    def test_create_default(self):
+    def test_create_default(self) -> None:
         kr = KeyRestrictions.create(expiry=0)
         assert kr.expiry == 0
         assert not kr.enforce_limits
         assert kr.limits == ()
 
-    def test_with_limits(self):
+    def test_with_limits(self) -> None:
         kr = KeyRestrictions.create(expiry=0)
         kr2 = kr.with_limits(TokenLimit(token=ALPHA_USD, limit=10**18))
         assert kr2.enforce_limits
         assert len(kr2.limits) == 1
 
-    def test_add_call(self):
+    def test_add_call(self) -> None:
         kr = KeyRestrictions.create(expiry=0)
         cs = CallScope.transfer(ALPHA_USD)
         kr2 = kr.add_call(cs)
         assert not kr2.allow_any_calls
         assert len(kr2.allowed_calls) == 1
 
-    def test_to_rlp(self):
+    def test_to_rlp(self) -> None:
         kr = KeyRestrictions.create(expiry=0)
         rlp = kr.to_rlp()
         assert isinstance(rlp, list)
@@ -177,7 +177,7 @@ class TestKeyRestrictions:
 
 
 class TestKeyAuthorization:
-    def test_create_minimal(self):
+    def test_create_minimal(self) -> None:
         ka = KeyAuthorization(
             key_id=KEY_ID,
             account=ACCOUNT,
@@ -188,7 +188,7 @@ class TestKeyAuthorization:
         assert ka.account is not None
         assert ka.chain_id == 42431
 
-    def test_create_with_expiry(self):
+    def test_create_with_expiry(self) -> None:
         ka = KeyAuthorization(
             key_id=KEY_ID,
             account=ACCOUNT,
@@ -197,7 +197,7 @@ class TestKeyAuthorization:
         )
         assert ka.expiry == 1893456000
 
-    def test_create_with_limits(self):
+    def test_create_with_limits(self) -> None:
         tl = TokenLimit(token=ALPHA_USD, limit=10**18)
         ka = KeyAuthorization(
             key_id=KEY_ID,
@@ -207,7 +207,7 @@ class TestKeyAuthorization:
         )
         assert len(ka.limits) == 1
 
-    def test_to_rlp(self):
+    def test_to_rlp(self) -> None:
         ka = KeyAuthorization(
             key_id=KEY_ID,
             account=ACCOUNT,
@@ -216,7 +216,7 @@ class TestKeyAuthorization:
         rlp = ka.to_rlp()
         assert isinstance(rlp, list)
 
-    def test_none_vs_empty_limits_and_calls(self):
+    def test_none_vs_empty_limits_and_calls(self) -> None:
         # None = absent (unlimited/unrestricted); () = present empty (deny-all).
         absent = KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1)
         assert absent.to_rlp()[4] == b"" and absent.to_rlp()[5] == b""
@@ -224,12 +224,12 @@ class TestKeyAuthorization:
         assert deny.to_rlp()[4] == [] and deny.to_rlp()[5] == []
         assert absent.signature_hash() != deny.signature_hash()
 
-    def test_account_omitted_trims_trailing_fields(self):
+    def test_account_omitted_trims_trailing_fields(self) -> None:
         ka = KeyAuthorization(key_id=KEY_ID, chain_id=1)
         # No optional set: everything after key_id is trimmed.
         assert ka.to_rlp() == [1, 0, bytes(ka.key_id)]
 
-    def test_admin_rejects_restrictions(self):
+    def test_admin_rejects_restrictions(self) -> None:
         with pytest.raises(ValueError, match="admin"):
             KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1, is_admin=True, expiry=123)
         with pytest.raises(ValueError, match="admin"):
@@ -237,7 +237,7 @@ class TestKeyAuthorization:
         with pytest.raises(ValueError, match="admin"):
             KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1, is_admin=True, allowed_calls=())
 
-    def test_witness_must_be_32_bytes(self):
+    def test_witness_must_be_32_bytes(self) -> None:
         with pytest.raises(ValueError, match="witness"):
             KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1, witness=b"\x11" * 65)
         ka = KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1, witness=b"\x11" * 32)
@@ -250,11 +250,11 @@ class TestKeyAuthorization:
 
 
 class TestKeychain:
-    def test_build_keychain_signature_length(self):
+    def test_build_keychain_signature_length(self) -> None:
         raw = build_keychain_signature(Signature(r=1, s=1, v=0), as_address(ACCOUNT))
         assert len(raw) == 86
 
-    def test_keychain_signature_parse(self):
+    def test_keychain_signature_parse(self) -> None:
         raw = build_keychain_signature(Signature(r=1, s=1, v=0), as_address(ACCOUNT))
         ks = KeychainSignature(raw=raw)
         assert len(ks.raw) == 86
@@ -267,7 +267,7 @@ class TestKeychain:
 
 
 class TestKeychainConstants:
-    def test_constants(self):
+    def test_constants(self) -> None:
         assert KEYCHAIN_SIGNATURE_TYPE == 0x04
         assert KEYCHAIN_SIGNATURE_LENGTH == 86
         assert INNER_SIGNATURE_LENGTH == 65
@@ -286,14 +286,14 @@ def _make_tx() -> TempoTransaction:
 
 
 class TestKeyAuthorizationRlp:
-    def test_admin_to_rlp_is_canonical_trailing_form(self):
+    def test_admin_to_rlp_is_canonical_trailing_form(self) -> None:
         ka = KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1337, is_admin=True)
         # [chain_id, key_type, key_id, expiry, limits, allowed_calls, witness, is_admin, account]
         # trailing-canonical: absent middle optionals are explicit 0x80 (b""),
         # is_admin is the marker 1, account is present.
         assert ka.to_rlp() == [1337, 0, bytes(ka.key_id), b"", b"", b"", b"", 1, bytes(ka.account)]
 
-    def test_admin_rlp_golden_vector(self):
+    def test_admin_rlp_golden_vector(self) -> None:
         # Byte-exact wire form accepted by the node (verified against a live
         # tempo dev node); pins the encoding independent of to_rlp/signature_hash.
         ka = KeyAuthorization(key_id=KEY_ID, account=ACCOUNT, chain_id=1337, is_admin=True)
@@ -305,7 +305,7 @@ class TestKeyAuthorizationRlp:
 
 
 class TestKeychainSignatureV2:
-    def test_layout_type_byte_and_roundtrip(self):
+    def test_layout_type_byte_and_roundtrip(self) -> None:
         inner = Signature(r=1, s=1, v=27)
         ks = KeychainSignature.from_inner(inner, ACCOUNT)
         raw = ks.to_bytes()
@@ -316,21 +316,21 @@ class TestKeychainSignatureV2:
         assert ks.user_address == as_address(ACCOUNT)
         assert ks.inner_signature == inner
 
-    def test_from_inner_canonicalizes_v(self):
+    def test_from_inner_canonicalizes_v(self) -> None:
         # The node re-encodes the inner sig with v in {27, 28} when computing
         # the canonical tx bytes/hash, so the envelope must embed that form.
         ks = KeychainSignature.from_inner(Signature(r=1, s=1, v=0), ACCOUNT)
         assert ks.to_bytes()[-1] == 27
         assert build_keychain_signature(Signature(r=1, s=1, v=1), ACCOUNT)[-1] == 28
 
-    def test_rejects_wrong_type_byte(self):
+    def test_rejects_wrong_type_byte(self) -> None:
         bad = bytes([0x03]) + bytes(20) + bytes(65)
         with pytest.raises(ValueError, match="type byte"):
             KeychainSignature(raw=bad)
 
 
 class TestSignTxAccessKey:
-    def test_admin_access_key_matches_node_format(self):
+    def test_admin_access_key_matches_node_format(self) -> None:
         root, access = Signer(ROOT_PK), Signer(ACCESS_PK)
         signed = sign_tx_access_key(_make_tx(), ACCESS_PK, root, is_admin=True)
 
@@ -366,7 +366,7 @@ class TestSignTxAccessKey:
         # verify_signature is keychain-aware and returns the root (tx sender)
         assert verify_signature(signed) == root.address
 
-    def test_restricted_access_key(self):
+    def test_restricted_access_key(self) -> None:
         root = Signer(ROOT_PK)
         signed = sign_tx_access_key(
             _make_tx(),
@@ -381,10 +381,10 @@ class TestSignTxAccessKey:
         assert auth_payload[4] == [[token, 10_000]]  # period omitted
         assert auth_payload[5] == [[token, [[bytes.fromhex("a9059cbb"), []]]]]
 
-    def test_rejects_non_secp256k1_key_type(self):
+    def test_rejects_non_secp256k1_key_type(self) -> None:
         with pytest.raises(ValueError, match="SECP256K1"):
             sign_tx_access_key(_make_tx(), ACCESS_PK, Signer(ROOT_PK), key_type=SignatureType.P256)
 
-    def test_rejects_admin_with_restrictions(self):
+    def test_rejects_admin_with_restrictions(self) -> None:
         with pytest.raises(ValueError, match="admin"):
             sign_tx_access_key(_make_tx(), ACCESS_PK, Signer(ROOT_PK), expiry=1893456000)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
 
 import attrs
 import rlp
@@ -74,7 +73,7 @@ def _encode_access_list(
     return result
 
 
-def _encode_signature(sig: Optional[Signature]) -> bytes:
+def _encode_signature(sig: Signature | None) -> bytes:
     """Encode a secp256k1 Signature as 65 raw bytes (r || s || v) for the envelope."""
     if sig is None:
         return b""
@@ -294,10 +293,10 @@ def verify_fee_payer_signature(tx: TempoTransaction, sender: BytesLike) -> Addre
 def _replace_fields(
     tx: TempoTransaction,
     *,
-    sender_signature: Optional[Signature] = None,
-    fee_payer_signature: Optional[Signature] = None,
-    sender_address: Optional[Address] = None,
-    awaiting_fee_payer: Optional[bool] = None,
+    sender_signature: Signature | None = None,
+    fee_payer_signature: Signature | None = None,
+    sender_address: Address | None = None,
+    awaiting_fee_payer: bool | None = None,
     **kwargs: object,
 ) -> TempoTransaction:
     """Return a new TempoTransaction with the given fields replaced."""
@@ -344,9 +343,9 @@ class Builder:
         self._access_list: list[object] = []
         self._nonce_key = DEFAULT_NONCE_KEY
         self._nonce = 0
-        self._valid_before: Optional[int] = None
-        self._valid_after: Optional[int] = None
-        self._fee_token: Optional[Address] = None
+        self._valid_before: int | None = None
+        self._valid_after: int | None = None
+        self._fee_token: Address | None = None
         self._awaiting_fee_payer = False
 
     def chain_id(self, cid: int) -> Builder:
@@ -381,7 +380,7 @@ class Builder:
         self._valid_after = ts
         return self
 
-    def fee_token(self, token: Optional[BytesLike]) -> Builder:
+    def fee_token(self, token: BytesLike | None) -> Builder:
         self._fee_token = as_optional_address(token) if token is not None else None
         return self
 

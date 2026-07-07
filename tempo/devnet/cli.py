@@ -31,7 +31,11 @@ from supervisor.supervisorctl import main as supervisorctl_main
 
 from .cluster import ClusterCLI
 from .config import DevnetConfig
-from .supervisor import SUPERVISOR_CONFIG_FILE, generate_supervisor_config
+from .supervisor import (
+    SUPERVISOR_CONFIG_FILE,
+    generate_docker_compose,
+    generate_supervisor_config,
+)
 
 
 def _cmd_exists(name: str) -> bool:
@@ -87,6 +91,7 @@ def init(
     data: str = "./data",
     config: str = "./devnet.yaml",
     force: bool = False,
+    gen_compose_file: bool = False,
     **kwargs: str | int | bool | None,
 ) -> None:
     """Initialize a local devnet: generate genesis + per-validator keys.
@@ -99,6 +104,7 @@ def init(
         data: Path to the root data directory.
         config: Path to the YAML configuration file.
         force: Overwrite existing data directory.
+        gen_compose_file: Also generate a ``docker-compose.yml``.
         **kwargs: Additional overrides for config fields (e.g. ``chain_id=1337``).
     """
     data_dir = Path(data).resolve()
@@ -148,6 +154,12 @@ def init(
     # Generate supervisor config
     sup_dst = generate_supervisor_config(cfg, data_dir, force=True)
     print(f"\nSupervisor config written to: {sup_dst}")
+
+    # Optionally generate docker-compose.yml
+    if gen_compose_file:
+        compose_dst = generate_docker_compose(cfg, data_dir, force=True)
+        print(f"Docker Compose file written to: {compose_dst}")
+
     print(f"Genesis written to: {data_dir / 'genesis.json'}")
     print(f"\nReady. Run: tempo-devnet start --data {data}")
 
@@ -223,10 +235,11 @@ class CLI:
         data: str = "./data",
         config: str = "./devnet.yaml",
         force: bool = False,
+        gen_compose_file: bool = False,
         **kwargs: str | int | bool | None,
     ) -> None:
         """Prepare genesis, keys, and supervisor config."""
-        init(data, config, force, **kwargs)
+        init(data, config, force, gen_compose_file, **kwargs)
 
     def start(self, data: str = "./data") -> None:
         """Start the supervisor daemon (all nodes)."""
@@ -237,10 +250,11 @@ class CLI:
         data: str = "./data",
         config: str = "./devnet.yaml",
         force: bool = False,
+        gen_compose_file: bool = False,
         **kwargs: str | int | bool | None,
     ) -> None:
         """Initialize and start the cluster (init + start)."""
-        init(data, config, force, **kwargs)
+        init(data, config, force, gen_compose_file, **kwargs)
         start(data)
 
     def status(self, data: str = "./data") -> None:
