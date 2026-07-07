@@ -87,10 +87,20 @@ class DevnetConfig:
             setattr(self, hf, data.get(hf, 0))
 
         # Optional patches
-        self.patch_genesis: dict[str, Any] = data.get("patch_genesis", {})
-        self.patch_reth: dict[str, Any] = data.get("patch_reth", {})
-        self.patch_node_flags: list[str] = data.get("patch_node_flags", [])
+        patch_genesis = data.get("patch_genesis") or {}
+        if not isinstance(patch_genesis, dict):
+            raise TypeError("patch_genesis must be a mapping (dict)")
+        self.patch_genesis: dict[str, Any] = patch_genesis
 
+        patch_reth = data.get("patch_reth") or {}
+        if not isinstance(patch_reth, dict):
+            raise TypeError("patch_reth must be a mapping (dict)")
+        self.patch_reth: dict[str, Any] = patch_reth
+
+        patch_node_flags = data.get("patch_node_flags") or []
+        if not isinstance(patch_node_flags, list) or any(not isinstance(x, str) for x in patch_node_flags):
+            raise TypeError("patch_node_flags must be a list of strings")
+        self.patch_node_flags: list[str] = patch_node_flags
         # Parse validators
         raw_validators = data.get("validators", [])
         if not raw_validators:
