@@ -720,6 +720,16 @@ class TestPatches:
 class TestDockerCompose:
     """Docker Compose generation."""
 
+    def test_default_image(self) -> None:
+        """Default Docker image points to the official Tempo container."""
+        cfg = DevnetConfig({
+            "validators": [
+                {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+            ],
+        })
+        assert cfg.docker_image == "ghcr.io/tempoxyz/tempo:latest"
+        assert cfg.docker_network == "tempo-devnet"
+
     def test_generates_yaml(self) -> None:
         cfg = DevnetConfig({
             "validators": [

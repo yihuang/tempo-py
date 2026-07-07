@@ -134,7 +134,7 @@ class DevnetConfig:
         docker_raw = data.get("docker") or {}
         if not isinstance(docker_raw, dict):
             raise TypeError("docker must be a mapping (dict)")
-        self.docker_image: str = docker_raw.get("image", "tempo:latest")
+        self.docker_image: str = docker_raw.get("image", "ghcr.io/tempoxyz/tempo:latest")
         self.docker_network: str = docker_raw.get("network", "tempo-devnet")
         # Parse validators
         raw_validators = data.get("validators", [])

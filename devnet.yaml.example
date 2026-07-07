@@ -93,8 +93,8 @@ validators:
 # Docker settings (optional — only used with --gen-compose-file)
 # ---------------------------------------------------------------------------
 # docker:
-#   image: tempo:latest       # Docker image for validator containers
-#   network: tempo-devnet      # Docker bridge network name
+#   image: ghcr.io/tempoxyz/tempo:latest   # Official Tempo image
+#   network: tempo-devnet                   # Docker bridge network name
 
 # ---------------------------------------------------------------------------
 # Config patches — applied after ``tempo-xtask generate-localnet`` finishes
