@@ -871,6 +871,8 @@ class TestDockerCompose:
             assert "exec" in content
             assert 'cd "$(dirname "$0")"' in content
             assert "tempo" in content
+            # stdout+stderr stream to node.log (bind-mounted), like supervisord's stdout_logfile
+            assert ">>./node.log 2>&1" in content
 
     def test_docker_integration(self) -> None:
         """generate_docker_compose writes docker-run.sh per validator."""
