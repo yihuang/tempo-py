@@ -72,8 +72,8 @@ seed: 42
 #   rpc_host: 0.0.0.0     # public — external full nodes can follow via WS
 #
 # Public bootnode (P2P reachable from external full nodes):
-#   host: 0.0.0.0
-#   p2p_host: 0.0.0.0
+#   host: <public-ip-or-dns>  # advertised address other nodes can dial
+#   p2p_host: 0.0.0.0         # bind on all interfaces
 #   rpc_host: 0.0.0.0
 validators:
   - host: 127.0.0.1
