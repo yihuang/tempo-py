@@ -131,7 +131,9 @@ class DevnetConfig:
         self.patch_node_flags: list[str] = patch_node_flags
 
         # Docker settings
-        docker_raw = data.get("docker", {})
+        docker_raw = data.get("docker") or {}
+        if not isinstance(docker_raw, dict):
+            raise TypeError("docker must be a mapping (dict)")
         self.docker_image: str = docker_raw.get("image", "tempo:latest")
         self.docker_network: str = docker_raw.get("network", "tempo-devnet")
         # Parse validators
