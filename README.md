@@ -51,7 +51,7 @@ data = ACCOUNT_KEYCHAIN.fns.authorizeKey(id, sig_type,
 
 ## Devnet (Multi-Node Testnet)
 
-Generate and run a multi-node Tempo testnet from a single YAML config, similar to [pystarport](https://github.com/crypto-com/pystarport).
+Generate and run a multi-node Tempo testnet from a single YAML config.
 
 ```bash
 # Install devnet dependencies
