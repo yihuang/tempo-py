@@ -1,7 +1,7 @@
 # Devnet — Multi-Node Testnet
 
 `tempo-devnet` generates and runs a multi-node Tempo testnet from a
-single YAML config file, similar to [pystarport](https://github.com/crypto-com/pystarport).
+single YAML config file.
 
 ## Quick Start
 
