@@ -10,7 +10,16 @@ import jsonmerge
 import tomlkit
 import yaml
 
-from .config import DevnetConfig, ValidatorConfig
+from .config import (
+    DevnetConfig,
+    ValidatorConfig,
+    DOCKER_AUTHRPC_PORT as _DOCKER_AUTHRPC,
+    DOCKER_CONSENSUS_METRICS_PORT as _DOCKER_CONSENSUS_METRICS,
+    DOCKER_CONSENSUS_P2P_PORT as _DOCKER_CONSENSUS_P2P,
+    DOCKER_EXECUTION_P2P_PORT as _DOCKER_EXECUTION_P2P,
+    DOCKER_HTTP_RPC_PORT as _DOCKER_HTTP_RPC,
+    DOCKER_WS_RPC_PORT as _DOCKER_WS_RPC,
+)
 from .ports import (
     authrpc_port,
     consensus_metrics_port,
@@ -333,14 +342,8 @@ def generate_supervisor_config(
 DOCKER_CONFIG_FILE = "docker-compose.yml"
 CONTAINER_DATA_DIR = "/data"
 
-# Fixed internal ports for Docker containers — each container has its own
-# network namespace so they can all use the same port numbers.
-_DOCKER_CONSENSUS_P2P = 8000
-_DOCKER_EXECUTION_P2P = 8001
-_DOCKER_CONSENSUS_METRICS = 8002
-_DOCKER_AUTHRPC = 8003
-_DOCKER_HTTP_RPC = 8004
-_DOCKER_WS_RPC = 8005
+# Fixed internal ports for Docker containers live in config.py (imported above as
+# ``_DOCKER_*``) so the genesis generator and the compose generator agree on them.
 
 
 def _docker_node_command(
@@ -458,36 +461,35 @@ def generate_docker_compose(
 
     Requires the tempo Docker image specified in ``config.docker_image``.
     """
+    # Absolute path so the volume source is a bind mount, not a named volume.
+    data_dir = data_dir.resolve()
+
     dst = data_dir / DOCKER_CONFIG_FILE
     if dst.exists() and not force:
         return dst
 
     services: dict[str, dict] = {}
 
-    for val in config.validators:
-        svc_name = val.moniker
+    for index, val in enumerate(config.validators):
         val_dir = data_dir / val.dir_name
+        write_docker_run_script(val_dir, _docker_node_command(config, val, data_dir))
 
-        # Generate docker-specific wrapper script with container paths
-        node_args = _docker_node_command(config, val, data_dir)
-        write_docker_run_script(val_dir, node_args)
+        # Publish HTTP/WS RPC to the host; authrpc (engine API) stays internal
+        # (reth binds it to localhost, so a published port never forwards).
+        published_ports = [
+            f"{val.base_port + 4}:{_DOCKER_HTTP_RPC}",
+            f"{val.base_port + 5}:{_DOCKER_WS_RPC}",
+        ]
 
-        # Container command points to the wrapper inside the mounted volume
-        container_script = f"{CONTAINER_DATA_DIR}/{val.dir_name}/docker-run.sh"
-
-        published_ports: list[str] = []
-        # Host port = base_port + offset, container port = fixed internal port.
-        # Restrict engine API (authrpc) to localhost by default.
-        published_ports.append(f"127.0.0.1:{val.base_port + 3}:{_DOCKER_AUTHRPC}")
-        published_ports.append(f"{val.base_port + 4}:{_DOCKER_HTTP_RPC}")
-        published_ports.append(f"{val.base_port + 5}:{_DOCKER_WS_RPC}")
-        services[svc_name] = {
+        services[val.moniker] = {
             "image": config.docker_image,
+            # Image ENTRYPOINT is the tempo binary; override so the script runs.
             "entrypoint": ["/bin/sh"],
-            "command": container_script,
+            "command": f"{CONTAINER_DATA_DIR}/{val.dir_name}/docker-run.sh",
             "volumes": [f"{data_dir}:{CONTAINER_DATA_DIR}"],
             "ports": published_ports,
-            "networks": [config.docker_network],
+            # Static IP so genesis-baked consensus peers are reachable across containers.
+            "networks": {config.docker_network: {"ipv4_address": config.docker_ip(index)}},
         }
 
     compose: dict = {
@@ -495,6 +497,7 @@ def generate_docker_compose(
         "networks": {
             config.docker_network: {
                 "driver": "bridge",
+                "ipam": {"config": [{"subnet": config.docker_subnet}]},
             },
         },
     }

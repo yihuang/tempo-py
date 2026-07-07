@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,20 @@ DEFAULT_ACCOUNTS = 10_000
 DEFAULT_MNEMONIC = "test test test test test test test test test test test junk"
 DEFAULT_TEMPO_BIN = "tempo"
 DEFAULT_TEMPO_XTASK_BIN = "tempo-xtask"
+
+# Fixed internal ports — each container has its own netns, so every validator
+# reuses the same numbers (offsets 0..5, mirroring ports.py).
+DOCKER_CONSENSUS_P2P_PORT = 8000
+DOCKER_EXECUTION_P2P_PORT = 8001
+DOCKER_CONSENSUS_METRICS_PORT = 8002
+DOCKER_AUTHRPC_PORT = 8003
+DOCKER_HTTP_RPC_PORT = 8004
+DOCKER_WS_RPC_PORT = 8005
+
+# Consensus peers are baked into genesis as numeric ip:port (no DNS), so each
+# container gets a static IP on this subnet at DOCKER_CONSENSUS_P2P_PORT.
+DEFAULT_DOCKER_SUBNET = "10.88.0.0/24"
+DOCKER_IP_HOST_OCTET_BASE = 10
 
 
 class ValidatorConfig:
@@ -136,6 +151,7 @@ class DevnetConfig:
             raise TypeError("docker must be a mapping (dict)")
         self.docker_image: str = docker_raw.get("image", "ghcr.io/tempoxyz/tempo:latest")
         self.docker_network: str = docker_raw.get("network", "tempo-devnet")
+        self.docker_subnet: str = docker_raw.get("subnet", DEFAULT_DOCKER_SUBNET)
         # Parse validators
         raw_validators = data.get("validators", [])
         if not raw_validators:
@@ -154,6 +170,23 @@ class DevnetConfig:
         """Comma-separated validator addresses for ``--validators``."""
         return ",".join(v.to_validator_arg() for v in self.validators)
 
+    def docker_ip(self, index: int) -> str:
+        """Static IP for validator ``index`` on the Docker bridge network."""
+        network = ipaddress.ip_network(self.docker_subnet, strict=False)
+        return str(network.network_address + DOCKER_IP_HOST_OCTET_BASE + index)
+
+    def docker_validator_addr(self, index: int) -> str:
+        """Genesis consensus address for validator ``index`` (``<static_ip>:<port>``).
+
+        Also the directory name ``tempo-xtask`` creates (it names dirs by socket).
+        """
+        return f"{self.docker_ip(index)}:{DOCKER_CONSENSUS_P2P_PORT}"
+
+    @property
+    def docker_validators_arg(self) -> str:
+        """``--validators`` for a Docker devnet: container static IPs, not host ports."""
+        return ",".join(self.docker_validator_addr(i) for i in range(len(self.validators)))
+
     @classmethod
     def load(cls, path: str | Path) -> DevnetConfig:
         """Load config from a YAML file."""
@@ -162,8 +195,11 @@ class DevnetConfig:
             data = yaml.safe_load(f) or {}
         return cls(data, source=path)
 
-    def to_genesis_args(self) -> list[str]:
-        """Build CLI args for ``tempo-xtask generate-localnet``."""
+    def to_genesis_args(self, validators_arg: str | None = None) -> list[str]:
+        """Build CLI args for ``tempo-xtask generate-localnet``.
+
+        ``validators_arg`` overrides ``--validators`` (Docker mode passes static IPs).
+        """
         args = [
             "--chain-id",
             str(self.chain_id),
@@ -176,7 +212,7 @@ class DevnetConfig:
             "--mnemonic",
             self.mnemonic,
             "--validators",
-            self.validators_arg,
+            validators_arg or self.validators_arg,
         ]
         if self.seed is not None:
             args.extend(["--seed", str(self.seed)])
@@ -223,5 +259,6 @@ class DevnetConfig:
         d["docker"] = {
             "image": self.docker_image,
             "network": self.docker_network,
+            "subnet": self.docker_subnet,
         }
         return d

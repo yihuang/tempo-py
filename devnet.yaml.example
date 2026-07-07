@@ -92,9 +92,14 @@ validators:
 # ---------------------------------------------------------------------------
 # Docker settings (optional — only used with --gen-compose-file)
 # ---------------------------------------------------------------------------
+# Each validator runs in its own container with a static IP on ``subnet`` so
+# the consensus peer addresses baked into genesis (``<static_ip>:8000``) are
+# reachable across containers.  HTTP/WS RPC is published to the host at
+# ``base_port + 4/5``; P2P stays inside the Docker network.
 # docker:
-#   image: ghcr.io/tempoxyz/tempo:latest   # Official Tempo image
-#   network: tempo-devnet                   # Docker bridge network name
+#   image: ghcr.io/tempoxyz/tempo:latest   # Official Tempo image for validators
+#   network: tempo-devnet                  # Docker bridge network name
+#   subnet: 10.88.0.0/24                   # Bridge subnet; validator i gets host octet 10+i
 
 # ---------------------------------------------------------------------------
 # Config patches — applied after ``tempo-xtask generate-localnet`` finishes
