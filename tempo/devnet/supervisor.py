@@ -233,6 +233,8 @@ def generate_supervisor_config(
     Returns:
         Path to the generated ``supervisord.ini`` file.
     """
+    data_dir = data_dir.resolve()
+
     # Apply genesis patch first
     apply_genesis_patch(data_dir, config.patch_genesis)
     dst = data_dir / SUPERVISOR_CONFIG_FILE
