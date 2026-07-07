@@ -58,6 +58,23 @@ seed: 42
 #   +3 engine API authrpc (--authrpc.port)
 #   +4 HTTP JSON-RPC (--http.port)
 #   +5 WebSocket (--ws.port)
+#
+# Network topology:
+# - ``host``: advertised IP for trusted-peers and metrics (default: 127.0.0.1)
+# - ``p2p_host``: IP to bind the consensus P2P listener (default: same as ``host``)
+#   Set to ``0.0.0.0`` to accept external P2P connections (for public bootnodes).
+# - ``rpc_host``: IP to bind HTTP/WS JSON-RPC (default: ``0.0.0.0``)
+#   External full nodes can sync via ``--follow ws://<host>:<ws_port>``.
+#
+# Private validator network (P2P on localhost, RPC on all interfaces):
+#   host: 127.0.0.1
+#   p2p_host: 127.0.0.1   # private — only other validators on same host can connect
+#   rpc_host: 0.0.0.0     # public — external full nodes can follow via WS
+#
+# Public bootnode (P2P reachable from external full nodes):
+#   host: 0.0.0.0
+#   p2p_host: 0.0.0.0
+#   rpc_host: 0.0.0.0
 validators:
   - host: 127.0.0.1
     port: 8000
@@ -71,6 +88,13 @@ validators:
   - host: 127.0.0.1
     port: 8030
     moniker: node3
+
+# ---------------------------------------------------------------------------
+# Docker settings (optional — only used with --gen-compose-file)
+# ---------------------------------------------------------------------------
+# docker:
+#   image: tempo:latest       # Docker image for validator containers
+#   network: tempo-devnet      # Docker bridge network name
 
 # ---------------------------------------------------------------------------
 # Config patches — applied after ``tempo-xtask generate-localnet`` finishes
