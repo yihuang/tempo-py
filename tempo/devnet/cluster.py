@@ -1,7 +1,9 @@
 """ClusterCLI — interact with a running tempo-devnet cluster.
 
 Provides access to the supervisor RPC interface, node status lookups,
-and convenience methods for querying a running cluster.
+and convenience methods for querying a running cluster. Running supervisord
+itself is left to the caller (the CLI ``start`` command, or a test harness
+managing its own child process).
 """
 
 from __future__ import annotations
@@ -77,11 +79,10 @@ class ClusterCLI:
     def supervisor(self) -> Any:
         """The supervisor XML-RPC proxy (lazy-init)."""
         if self._supervisor_proxy is None:
-            sock_path = self.data_dir / "supervisor.sock"
             self._supervisor_proxy = xmlrpclib.ServerProxy(
                 "http://127.0.0.1",
                 transport=xmlrpc.SupervisorTransport(
-                    serverurl=f"unix://{sock_path}",
+                    serverurl=f"unix://{self.data_dir / 'supervisor.sock'}",
                 ),
             )
         return self._supervisor_proxy.supervisor
@@ -93,7 +94,14 @@ class ClusterCLI:
             List of dicts with keys: ``name``, ``group``, ``state``,
             ``statename``, ``pid``, ``uptime_seconds``, ``description``.
         """
-        raw = self.supervisor.getAllProcessInfo()
+        try:
+            raw = self.supervisor.getAllProcessInfo()
+        except Exception:
+            # A request that failed mid-flight (e.g. supervisord still booting)
+            # leaves the cached transport unusable ("Request-sent"); drop it so
+            # the caller's retry reconnects cleanly.
+            self._supervisor_proxy = None
+            raise
         return list(raw)
 
     def start_node(self, moniker: str) -> bool:

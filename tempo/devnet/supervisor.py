@@ -17,6 +17,8 @@ from .ports import (
 
 SUPERVISOR_CONFIG_FILE = "supervisord.ini"
 LOCALNET_SIGNING_KEY_SECRET = "tempo-localnet-signing-key-secret"
+
+
 COMMON_PROG_OPTIONS: dict[str, str] = {
     "autostart": "true",
     "autorestart": "true",
@@ -197,11 +199,12 @@ def generate_supervisor_config(
         "supervisor.rpcinterface_factory": "supervisor.rpcinterface:make_main_rpcinterface",
     }
 
+    sock = data_dir / "supervisor.sock"
     ini.add_section("unix_http_server")
-    ini["unix_http_server"] = {"file": f"{data_dir}/supervisor.sock"}
+    ini["unix_http_server"] = {"file": str(sock)}
 
     ini.add_section("supervisorctl")
-    ini["supervisorctl"] = {"serverurl": f"unix://{data_dir}/supervisor.sock"}
+    ini["supervisorctl"] = {"serverurl": f"unix://{sock}"}
 
     # Derive trusted peers from enode identity files
     peers = _trusted_peers(config, data_dir)
