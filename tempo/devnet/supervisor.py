@@ -483,6 +483,7 @@ def generate_docker_compose(
         published_ports.append(f"{val.base_port + 5}:{_DOCKER_WS_RPC}")
         services[svc_name] = {
             "image": config.docker_image,
+            "entrypoint": ["/bin/sh"],
             "command": container_script,
             "volumes": [f"{data_dir}:{CONTAINER_DATA_DIR}"],
             "ports": published_ports,
