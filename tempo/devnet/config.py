@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -43,9 +43,9 @@ class ValidatorConfig:
         host: str = "127.0.0.1",
         port: int,
         moniker: str = "",
-        base_port: Optional[int] = None,
-        p2p_host: Optional[str] = None,
-        rpc_host: Optional[str] = None,
+        base_port: int | None = None,
+        p2p_host: str | None = None,
+        rpc_host: str | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -96,13 +96,13 @@ class ValidatorConfig:
 class DevnetConfig:
     """Complete devnet configuration loaded from a YAML file."""
 
-    def __init__(self, data: dict[str, Any], source: Optional[Path] = None) -> None:
+    def __init__(self, data: dict[str, Any], source: Path | None = None) -> None:
         self._source = source
         self.chain_id: int = data.get("chain_id", DEFAULT_CHAIN_ID)
         self.accounts: int = data.get("accounts", DEFAULT_ACCOUNTS)
         self.epoch_length: int = data.get("epoch_length", DEFAULT_EPOCH_LENGTH)
         self.gas_limit: int = data.get("gas_limit", DEFAULT_GAS_LIMIT)
-        self.seed: Optional[int] = data.get("seed")
+        self.seed: int | None = data.get("seed")
         self.mnemonic: str = data.get("mnemonic", DEFAULT_MNEMONIC)
         self.tempo_bin: str = data.get("tempo_bin", DEFAULT_TEMPO_BIN)
         self.tempo_xtask_bin: str = data.get("tempo_xtask_bin", DEFAULT_TEMPO_XTASK_BIN)

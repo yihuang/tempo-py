@@ -50,7 +50,7 @@ target-version = "py313"
 line-length = 120
 
 [tool.ruff.lint]
-extend-select = ["PLC0415"]
+extend-select = ["PLC0415", "ANN", "UP"]
 
 [tool.ruff.format]
 quote-style = "double"

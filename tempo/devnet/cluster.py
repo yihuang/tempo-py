@@ -9,16 +9,16 @@ managing its own child process).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from supervisor import xmlrpc
 from supervisor.compat import xmlrpclib
 
-from .config import DevnetConfig
+from .config import DevnetConfig, ValidatorConfig
 from .ports import http_rpc_port, ws_rpc_port
 
 
-def _find_validator_by_moniker(config: DevnetConfig, moniker: str) -> Optional[Any]:
+def _find_validator_by_moniker(config: DevnetConfig, moniker: str) -> ValidatorConfig | None:
     """Find a validator config by its moniker."""
     for v in config.validators:
         if v.moniker == moniker:
@@ -26,7 +26,7 @@ def _find_validator_by_moniker(config: DevnetConfig, moniker: str) -> Optional[A
     return None
 
 
-def _find_validator_by_addr(config: DevnetConfig, addr: str) -> Optional[Any]:
+def _find_validator_by_addr(config: DevnetConfig, addr: str) -> ValidatorConfig | None:
     """Find a validator config by its ``ip:port`` address."""
     for v in config.validators:
         if v.addr_str == addr:
@@ -47,11 +47,11 @@ class ClusterCLI:
     def __init__(
         self,
         data_dir: str | Path,
-        config: Optional[DevnetConfig] = None,
+        config: DevnetConfig | None = None,
     ) -> None:
         self.data_dir = Path(data_dir).resolve()
         self._config = config
-        self._supervisor_proxy: Any = None
+        self._supervisor_proxy: object | None = None
 
     @property
     def config(self) -> DevnetConfig:
@@ -76,7 +76,7 @@ class ClusterCLI:
     # ------------------------------------------------------------------
 
     @property
-    def supervisor(self) -> Any:
+    def supervisor(self) -> object:
         """The supervisor XML-RPC proxy (lazy-init)."""
         if self._supervisor_proxy is None:
             self._supervisor_proxy = xmlrpclib.ServerProxy(

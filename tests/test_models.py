@@ -8,26 +8,26 @@ from tempo.models import Call, Signature, TempoTransaction
 
 
 class TestCall:
-    def test_create_basic(self):
+    def test_create_basic(self) -> None:
         c = Call.create(to="0x" + "ab" * 20)
         assert len(c.to) == 20
         assert c.value == 0
         assert c.data == b""
 
-    def test_create_with_value(self):
+    def test_create_with_value(self) -> None:
         c = Call.create(to="0x" + "ab" * 20, value=100, data="0xdeadbeef")
         assert c.value == 100
         assert c.data == b"\xde\xad\xbe\xef"
 
-    def test_rejects_negative_value(self):
+    def test_rejects_negative_value(self) -> None:
         with pytest.raises(ValueError):
             Call.create(to="0x" + "ab" * 20, value=-1)
 
-    def test_empty_to_for_contract_creation(self):
+    def test_empty_to_for_contract_creation(self) -> None:
         c = Call.create(to=b"", value=0)
         assert c.to == b""
 
-    def test_as_rlp_list(self):
+    def test_as_rlp_list(self) -> None:
         c = Call.create(to="0x" + "01" * 20, value=42, data="0x1234")
         rlp = c.as_rlp_list()
         assert len(rlp) == 3
@@ -37,18 +37,18 @@ class TestCall:
 
 
 class TestSignature:
-    def test_create_valid(self):
+    def test_create_valid(self) -> None:
         sig = Signature(r=1, s=1, v=0)
         assert sig.r == 1
         assert sig.y_parity == 0
 
-    def test_v_normalization(self):
+    def test_v_normalization(self) -> None:
         assert Signature(r=1, s=1, v=27).y_parity == 0
         assert Signature(r=1, s=1, v=28).y_parity == 1
         assert Signature(r=1, s=1, v=0).y_parity == 0
         assert Signature(r=1, s=1, v=1).y_parity == 1
 
-    def test_to_bytes_roundtrip(self):
+    def test_to_bytes_roundtrip(self) -> None:
         sig = Signature(r=12345, s=67890, v=27)
         raw = sig.to_bytes()
         assert len(raw) == 65
@@ -57,44 +57,44 @@ class TestSignature:
         assert restored.s == 67890
         assert restored.v == 27
 
-    def test_to_rlp_list(self):
+    def test_to_rlp_list(self) -> None:
         sig = Signature(r=99, s=100, v=28)
         rlp = sig.to_rlp_list()
         assert rlp == [1, 99, 100]
 
-    def test_rejects_invalid_r(self):
+    def test_rejects_invalid_r(self) -> None:
         with pytest.raises(ValueError):
             Signature(r=0, s=1, v=0)
 
-    def test_rejects_invalid_s(self):
+    def test_rejects_invalid_s(self) -> None:
         n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
         with pytest.raises(ValueError):
             Signature(r=1, s=n, v=0)
 
-    def test_rejects_invalid_v(self):
+    def test_rejects_invalid_v(self) -> None:
         with pytest.raises(ValueError):
             Signature(r=1, s=1, v=99)
 
 
 class TestTempoTransaction:
-    def test_create_empty(self):
+    def test_create_empty(self) -> None:
         tx = TempoTransaction.create()
         assert tx.chain_id == 4217  # mainnet default
         assert tx.gas_limit == 21_000
         assert tx.calls == ()
 
-    def test_create_with_calls(self):
+    def test_create_with_calls(self) -> None:
         c = Call.create(to="0x" + "ab" * 20, value=1)
         tx = TempoTransaction.create(chain_id=CHAIN_ID_MODERATO, calls=(c,))
         assert len(tx.calls) == 1
         assert tx.chain_id == 42431
 
-    def test_signature_flags(self):
+    def test_signature_flags(self) -> None:
         tx = TempoTransaction.create()
         assert not tx.has_sender_signature
         assert not tx.has_fee_payer_signature
 
-    def test_clone_drops_signatures(self):
+    def test_clone_drops_signatures(self) -> None:
         tx = TempoTransaction.create()
         signed = attrs.evolve(tx, sender_signature=Signature(r=1, s=1, v=0))
         assert signed.has_sender_signature
@@ -102,7 +102,7 @@ class TestTempoTransaction:
         assert not cloned.has_sender_signature
         assert cloned.chain_id == tx.chain_id
 
-    def test_from_dict_camelCase(self):
+    def test_from_dict_camelCase(self) -> None:
         tx = TempoTransaction.from_dict(
             {
                 "chainId": 42431,
@@ -120,7 +120,7 @@ class TestTempoTransaction:
         assert len(tx.calls) == 1
         assert tx.calls[0].value == 1000
 
-    def test_from_dict_snake_case(self):
+    def test_from_dict_snake_case(self) -> None:
         tx = TempoTransaction.from_dict(
             {
                 "chain_id": 42431,

@@ -857,7 +857,7 @@ class TestDockerCompose:
 
 
 class TestFindFreeBasePorts:
-    def test_returns_spaced_bindable_blocks(self):
+    def test_returns_spaced_bindable_blocks(self) -> None:
         bases = find_free_base_ports(4)
         assert len(bases) == 4
         assert all(bases[i + 1] - bases[i] == 10 for i in range(3))  # default stride
@@ -867,5 +867,5 @@ class TestFindFreeBasePorts:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.bind(("127.0.0.1", base + offset))
 
-    def test_blocks_stay_under_the_port_ceiling(self):
+    def test_blocks_stay_under_the_port_ceiling(self) -> None:
         assert max(find_free_base_ports(4)) + PORTS_PER_NODE < 65536
