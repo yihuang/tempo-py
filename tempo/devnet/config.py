@@ -195,7 +195,7 @@ class DevnetConfig:
             data = yaml.safe_load(f) or {}
         return cls(data, source=path)
 
-    def to_genesis_args(self, validators_arg: Optional[str] = None) -> list[str]:
+    def to_genesis_args(self, validators_arg: str | None = None) -> list[str]:
         """Build CLI args for ``tempo-xtask generate-localnet``.
 
         ``validators_arg`` overrides ``--validators`` (Docker mode passes static IPs).
