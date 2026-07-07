@@ -214,6 +214,40 @@ class TestDevnetConfig:
         assert cfg1.no_dkg_in_genesis == cfg2.no_dkg_in_genesis
         assert len(cfg1.validators) == len(cfg2.validators)
 
+    def test_docker_addressing(self) -> None:
+        """Docker mode: static IPs + consensus port for genesis validator addresses."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                    {"host": "127.0.0.1", "port": 8020, "moniker": "node2"},
+                ],
+            }
+        )
+        # Default /24 subnet, host octet base 10.
+        assert cfg.docker_subnet == "10.88.0.0/24"
+        assert cfg.docker_ip(0) == "10.88.0.10"
+        assert cfg.docker_ip(2) == "10.88.0.12"
+        # Consensus addresses use the fixed internal consensus port (8000), not base_port.
+        assert cfg.docker_validator_addr(1) == "10.88.0.11:8000"
+        assert cfg.docker_validators_arg == "10.88.0.10:8000,10.88.0.11:8000,10.88.0.12:8000"
+        # to_genesis_args honors the override.
+        args = cfg.to_genesis_args(cfg.docker_validators_arg)
+        assert cfg.docker_validators_arg in args
+        assert cfg.validators_arg not in args
+
+    def test_docker_subnet_override(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000}],
+                "docker": {"subnet": "10.203.0.0/24"},
+            }
+        )
+        assert cfg.docker_ip(0) == "10.203.0.10"
+        # Round-trips through to_dict.
+        assert DevnetConfig(cfg.to_dict()).docker_subnet == "10.203.0.0/24"
+
     def test_hardfork_timestamps(self) -> None:
         cfg = DevnetConfig(
             {
@@ -765,6 +799,18 @@ class TestDockerCompose:
             # RPC ports: host_port = base+offset, container port = fixed 8004
             assert "8004:8004" in content  # node0: host=8004 → container=8004
             assert "8014:8004" in content  # node1: host=8014 → container=8004
+            # authrpc (engine API) is internal and must NOT be published
+            assert "8003:8003" not in content
+            assert "8013:8003" not in content
+            # ENTRYPOINT of the tempo image is the `tempo` binary; the compose
+            # service must override it so the wrapper script actually runs.
+            assert "/bin/sh" in content
+            # Static IPs so genesis-baked consensus peer addresses are reachable
+            # across containers; the network declares the matching subnet.
+            parsed = yaml.safe_load(content)
+            assert parsed["networks"]["test-net"]["ipam"]["config"][0]["subnet"] == cfg.docker_subnet
+            assert parsed["services"]["node0"]["networks"]["test-net"]["ipv4_address"] == cfg.docker_ip(0)
+            assert parsed["services"]["node1"]["networks"]["test-net"]["ipv4_address"] == cfg.docker_ip(1)
             # Command references docker-run.sh wrapper, not inline tempo args
             assert "/data/node0/docker-run.sh" in content
             assert "/data/node1/docker-run.sh" in content

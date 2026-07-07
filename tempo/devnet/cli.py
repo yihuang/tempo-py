@@ -48,32 +48,39 @@ def _cmd_exists(name: str) -> bool:
     return False
 
 
-def _ensure_tempo_bins(config: DevnetConfig) -> None:
-    """Verify that the required tempo binaries are available."""
+def _ensure_tempo_bins(config: DevnetConfig, *, require_node_bin: bool = True) -> None:
+    """Verify the required tempo binaries are on the host PATH.
+
+    ``tempo-xtask`` is always required (it builds genesis + keys). The ``tempo``
+    node binary is only needed for the supervisor path; in Docker mode it lives
+    in the image, so ``require_node_bin=False`` downgrades it to a warning.
+    """
+    node_bin_present = _cmd_exists(config.tempo_bin)
     missing = []
-    if not _cmd_exists(config.tempo_bin):
-        missing.append(config.tempo_bin)
     if not _cmd_exists(config.tempo_xtask_bin):
         missing.append(config.tempo_xtask_bin)
+    if require_node_bin and not node_bin_present:
+        missing.append(config.tempo_bin)
     if missing:
-        print(
-            f"Error: required binaries not found on PATH: {', '.join(missing)}",
-            file=sys.stderr,
-        )
-        print(
-            "Make sure tempo and tempo-xtask are installed and on your PATH.",
-            file=sys.stderr,
-        )
+        print(f"Error: required binaries not found on PATH: {', '.join(missing)}", file=sys.stderr)
+        print("Make sure tempo and tempo-xtask are installed and on your PATH.", file=sys.stderr)
         sys.exit(1)
+    if not node_bin_present:  # only reached in Docker mode (require_node_bin=False)
+        print(
+            f"Note: {config.tempo_bin!r} not on host PATH; expected inside the Docker image {config.docker_image!r}.",
+            file=sys.stderr,
+        )
 
 
-def _rename_validator_dirs(data_dir: Path, config: DevnetConfig) -> None:
-    """Rename validator directories from ``ip:port`` (created by ``generate-localnet``)
-    to moniker-based names.
+def _rename_validator_dirs(data_dir: Path, config: DevnetConfig, *, docker: bool = False) -> None:
+    """Rename each validator's ``ip:port`` dir (named by its ``--validators``
+    socket) to its moniker.  In Docker mode that socket is the container static
+    IP (:meth:`DevnetConfig.docker_validator_addr`), not the host ``ip:port``.
     """
     rename_map: list[tuple[Path, Path]] = []
-    for val in config.validators:
-        src = data_dir / val.addr_str
+    for index, val in enumerate(config.validators):
+        src_name = config.docker_validator_addr(index) if docker else val.addr_str
+        src = data_dir / src_name
         dst = data_dir / val.dir_name
         if src == dst:
             continue
@@ -118,7 +125,8 @@ def init(
             if hasattr(cfg, k) and v is not None:
                 setattr(cfg, k, v)
 
-    _ensure_tempo_bins(cfg)
+    # In Docker mode the node binary runs inside the image, not on the host.
+    _ensure_tempo_bins(cfg, require_node_bin=not gen_compose_file)
 
     # Prepare data directory
     if data_dir.exists():
@@ -134,8 +142,10 @@ def init(
     # Build and run tempo-xtask generate-localnet
     xtask_args = [cfg.tempo_xtask_bin, "generate-localnet", "--output", str(data_dir), "--force"]
 
-    # Forward genesis args
-    xtask_args.extend(cfg.to_genesis_args())
+    # Docker mode bakes container static IPs into genesis (host loopback ports
+    # would resolve to the container itself); otherwise use the host addresses.
+    genesis_validators = cfg.docker_validators_arg if gen_compose_file else None
+    xtask_args.extend(cfg.to_genesis_args(genesis_validators))
 
     print(f"Running: {' '.join(xtask_args)}")
     result = subprocess.run(xtask_args, capture_output=False)
@@ -144,7 +154,7 @@ def init(
         sys.exit(1)
 
     # Rename validator dirs from ip:port to moniker names
-    _rename_validator_dirs(data_dir, cfg)
+    _rename_validator_dirs(data_dir, cfg, docker=gen_compose_file)
 
     # Save a copy of the config in the data directory for later use
     config_dst = data_dir / "devnet.yaml"
