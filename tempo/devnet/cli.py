@@ -25,6 +25,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import fire
+import yaml
+from supervisor.supervisorctl import main as supervisorctl_main
+
 from .cluster import ClusterCLI
 from .config import DevnetConfig
 from .supervisor import SUPERVISOR_CONFIG_FILE, generate_supervisor_config
@@ -139,8 +143,6 @@ def init(
     # Save a copy of the config in the data directory for later use
     config_dst = data_dir / "devnet.yaml"
     with open(config_dst, "w") as f:
-        import yaml
-
         yaml.dump(cfg.to_dict(), f, default_flow_style=False)
 
     # Generate supervisor config
@@ -206,9 +208,7 @@ def supervisorctl(*args: str, data: str = "./data") -> None:
         print(f"Error: {tasks_ini} not found. Is the cluster initialized?", file=sys.stderr)
         sys.exit(1)
 
-    from supervisor.supervisorctl import main
-
-    main(("-c", str(tasks_ini), *args))
+    supervisorctl_main(("-c", str(tasks_ini), *args))
 
 
 class CLI:
@@ -267,8 +267,6 @@ def main() -> None:
         tempo-devnet status --data ./data
         tempo-devnet supervisorctl status
     """
-    import fire
-
     fire.Fire(CLI)
 
 

@@ -15,7 +15,7 @@ from supervisor import xmlrpc
 from supervisor.compat import xmlrpclib
 
 from .config import DevnetConfig
-from .ports import http_rpc_port
+from .ports import http_rpc_port, ws_rpc_port
 
 
 def _find_validator_by_moniker(config: DevnetConfig, moniker: str) -> Optional[Any]:
@@ -143,8 +143,6 @@ class ClusterCLI:
 
     def node_ws_url(self, moniker: str) -> str:
         """Get the WebSocket RPC URL for a validator node by moniker."""
-        from .ports import ws_rpc_port
-
         v = _find_validator_by_moniker(self.config, moniker)
         if v is None:
             raise KeyError(f"validator {moniker!r} not found")

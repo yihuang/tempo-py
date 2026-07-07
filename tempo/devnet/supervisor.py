@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import configparser
+import json
 from pathlib import Path
+
+import jsonmerge
+import tomlkit
 
 from .config import DevnetConfig
 from .ports import (
@@ -66,11 +70,12 @@ def _build_node_args(
     secret_file: str,
     enode_key: str,
     trusted_peers: list[str],
+    extra_flags: list[str] | None = None,
 ) -> list[str]:
     """Build the argument list for ``tempo node``."""
     peers_str = ",".join(trusted_peers)
 
-    return [
+    args: list[str] = [
         tempo_bin,
         "node",
         "--consensus.signing-key",
@@ -112,6 +117,11 @@ def _build_node_args(
         "--consensus.use-local-defaults",
         "--consensus.allow-private-ips",
     ]
+
+    if extra_flags:
+        args.extend(extra_flags)
+
+    return args
 
 
 def write_run_script(
@@ -155,6 +165,50 @@ def _sh_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def apply_genesis_patch(data_dir: Path, patch: dict) -> None:
+    """Deep-merge a patch dict into ``genesis.json``.
+
+    Args:
+        data_dir: Root directory containing ``genesis.json``.
+        patch: Dict of genesis fields to override (deep-merged).
+    """
+    if not patch:
+        return
+
+    genesis_path = data_dir / "genesis.json"
+    if not genesis_path.exists():
+        return
+
+    with open(genesis_path) as f:
+        genesis = json.load(f)
+
+    genesis = jsonmerge.merge(genesis, patch)
+
+    with open(genesis_path, "w") as f:
+        json.dump(genesis, f, indent=2)
+
+    print(f"  patched genesis.json with {len(patch)} top-level key(s)")
+
+
+def write_reth_config(val_dir: Path, patch: dict) -> None:
+    """Write a ``reth.toml`` config file into a node's data directory.
+
+    Uses ``tomlkit`` for proper TOML serialization.  Only non-empty patches
+    produce output.
+
+    Args:
+        val_dir: Node data directory.
+        patch: Dict of reth config options.
+    """
+    if not patch:
+        return
+
+    reth_path = val_dir / "reth.toml"
+    with open(reth_path, "w") as f:
+        tomlkit.dump(patch, f)
+    print(f"  wrote reth.toml to {val_dir.name}/")
+
+
 def generate_supervisor_config(
     config: DevnetConfig,
     data_dir: Path,
@@ -166,9 +220,10 @@ def generate_supervisor_config(
     Also writes:
     - A ``.secret`` passphrase file inside each node directory.
     - A ``run.sh`` wrapper script that exec's the node command.
+    - ``reth.toml`` per node if ``config.patch_reth`` is set.
+    - Patches ``genesis.json`` if ``config.patch_genesis`` is set.
 
-    The supervisor command is simply ``./run.sh`` (relative to the node
-    directory), keeping the INI file concise.
+    The supervisor command is an absolute path to ``run.sh``.
 
     Args:
         config: The devnet configuration.
@@ -178,6 +233,8 @@ def generate_supervisor_config(
     Returns:
         Path to the generated ``supervisord.ini`` file.
     """
+    # Apply genesis patch first
+    apply_genesis_patch(data_dir, config.patch_genesis)
     dst = data_dir / SUPERVISOR_CONFIG_FILE
     if dst.exists() and not force:
         return dst
@@ -234,10 +291,14 @@ def generate_supervisor_config(
             secret_file=secret_file,
             enode_key=enode_key,
             trusted_peers=peers,
+            extra_flags=config.patch_node_flags or None,
         )
 
         # Write the wrapper script
         write_run_script(val_dir, node_args)
+
+        # Write per-node reth config
+        write_reth_config(val_dir, config.patch_reth)
 
         # Supervisor runs the wrapper script via absolute path.
         # Using an absolute path avoids issues with supervisor's execve

@@ -86,6 +86,11 @@ class DevnetConfig:
         for hf in [f"t{i}_time" for i in range(9)]:
             setattr(self, hf, data.get(hf, 0))
 
+        # Optional patches
+        self.patch_genesis: dict[str, Any] = data.get("patch_genesis", {})
+        self.patch_reth: dict[str, Any] = data.get("patch_reth", {})
+        self.patch_node_flags: list[str] = data.get("patch_node_flags", [])
+
         # Parse validators
         raw_validators = data.get("validators", [])
         if not raw_validators:
@@ -164,4 +169,10 @@ class DevnetConfig:
             val = getattr(self, hf)
             if val != 0:
                 d[hf] = val
+        if self.patch_genesis:
+            d["patch_genesis"] = self.patch_genesis
+        if self.patch_reth:
+            d["patch_reth"] = self.patch_reth
+        if self.patch_node_flags:
+            d["patch_node_flags"] = self.patch_node_flags
         return d

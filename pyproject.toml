@@ -25,6 +25,8 @@ devnet = [
     "pyyaml>=6.0",
     "supervisor>=4.2",
     "fire>=0.7.0",
+    "tomlkit>=0.13.0",
+    "jsonmerge>=1.9.0",
 ]
 
 [dependency-groups]
@@ -46,6 +48,9 @@ package = true
 [tool.ruff]
 target-version = "py313"
 line-length = 120
+
+[tool.ruff.lint]
+extend-select = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"

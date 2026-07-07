@@ -1,6 +1,9 @@
 """Tests for tempo.transaction."""
 
+import time
+
 import pytest
+import rlp
 
 from tempo import Call, Signer, TempoTransaction
 from tempo.constants import ACCOUNT_KEYCHAIN_ADDRESS, ALPHA_USD, CHAIN_ID_MODERATO
@@ -13,6 +16,7 @@ from tempo.transaction import (
     get_fee_payer_sign_payload,
     get_sign_payload,
     serialize,
+    serialize_for_fee_payer_signing,
     serialize_for_signing,
     sign_transaction,
     verify_fee_payer_signature,
@@ -73,8 +77,6 @@ class TestSerialization:
         assert ser.startswith("0x76")
 
     def test_serialize_for_fee_payer_signing(self):
-        from tempo.transaction import serialize_for_fee_payer_signing
-
         tx = _make_tx(awaiting_fee_payer=True)
         signer = Signer(TEST_PK)
         signed_by_sender = sign_transaction(tx, signer)
@@ -82,10 +84,6 @@ class TestSerialization:
         assert ser.startswith("0x78")
 
     def test_fee_payer_payload_includes_fee_token(self):
-        import rlp
-
-        from tempo.transaction import serialize_for_fee_payer_signing
-
         tx = _make_tx(awaiting_fee_payer=True, fee_token=ALPHA_USD)
         signer = Signer(TEST_PK)
         signed = sign_transaction(tx, signer)
@@ -101,8 +99,6 @@ class TestSerialization:
     def test_sender_payload_skips_fee_token_once_fee_payer_signed(self):
         # An attached fee payer sig skips fee_token even with awaiting_fee_payer
         # unset, matching upstream's fee_payer_signature.is_some() rule.
-        import rlp
-
         tx = _make_tx(awaiting_fee_payer=False, fee_token=ALPHA_USD)
         signed = sign_transaction(tx, Signer(TEST_PK))
         final = add_fee_payer_signature(signed, Signer(FEE_PAYER_PK))
@@ -229,8 +225,6 @@ class TestBuilder:
         assert ser.startswith("0x76")
 
     def test_build_with_validity_window(self):
-        import time
-
         now = int(time.time())
         tx = (
             TxBuilder()
