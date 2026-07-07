@@ -1,5 +1,6 @@
 """Tests for tempo.models."""
 
+import attrs
 import pytest
 
 from tempo.constants import CHAIN_ID_MODERATO
@@ -94,8 +95,6 @@ class TestTempoTransaction:
         assert not tx.has_fee_payer_signature
 
     def test_clone_drops_signatures(self):
-        import attrs
-
         tx = TempoTransaction.create()
         signed = attrs.evolve(tx, sender_signature=Signature(r=1, s=1, v=0))
         assert signed.has_sender_signature

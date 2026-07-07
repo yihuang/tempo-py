@@ -71,3 +71,32 @@ validators:
   - host: 127.0.0.1
     port: 8030
     moniker: node3
+
+# ---------------------------------------------------------------------------
+# Config patches — applied after ``tempo-xtask generate-localnet`` finishes
+# ---------------------------------------------------------------------------
+
+# Patch genesis.json (deep-merged, overrides any field).
+# Use this to tweak chain config after generation.
+# patch_genesis:
+#   config:
+#     extra_fields:
+#       epochLength: 50
+#   nonce: "0x42"
+#   difficulty: "0x0"
+
+# Patch reth.toml (written into each node's data directory).
+# Controls reth's own config (p2p, db, rpc, etc).
+# patch_reth:
+#   p2p:
+#     max_inbound: 50
+#   db:
+#     max_size: "8TB"
+
+# Extra CLI flags passed to every ``tempo node`` invocation.
+# Each entry is a separate argument (not shell-quoted as a whole).
+# patch_node_flags:
+#   - "--txpool.max-tempo-authorizations"
+#   - "32"
+#   - "--txpool.aa-valid-after-max-secs"
+#   - "600"

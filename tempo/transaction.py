@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+import attrs
 import rlp
 from eth_utils import keccak, to_bytes
 
 from .constants import DEFAULT_CHAIN_ID, DEFAULT_NONCE_KEY
-from .models import Call, Signature, TempoTransaction
-from .signer import Signer
+from .models import AccessListItem, Call, Signature, TempoTransaction
+from .signer import Signer, recover_address
 from .types import Address, BytesLike, as_address, as_optional_address
 
 
@@ -64,9 +65,6 @@ def _encode_access_list(
     """Encode access list as RLP list of [address, [storageKeys]]."""
     result = []
     for item in access_list:
-        # Import here to avoid circular dependency
-        from .models import AccessListItem
-
         if isinstance(item, AccessListItem):
             addr_bytes = bytes(item.address)
             keys = [bytes(k) for k in item.storage_keys]
@@ -267,8 +265,8 @@ def verify_signature(tx: TempoTransaction) -> Address:
     if tx.sender_signature is None:
         raise ValueError("transaction has no sender signature")
 
-    from .keychain import KeychainSignature
-    from .signer import recover_address
+    # Inline import avoids circular dep: keychain -> transaction -> keychain
+    from .keychain import KeychainSignature  # noqa: PLC0415
 
     hash_signed = get_sign_payload(tx)
     sig = tx.sender_signature
@@ -283,8 +281,6 @@ def verify_fee_payer_signature(tx: TempoTransaction, sender: BytesLike) -> Addre
     """Recover and return the fee payer address from a signed transaction."""
     if tx.fee_payer_signature is None:
         raise ValueError("transaction has no fee payer signature")
-
-    from .signer import recover_address
 
     hash_signed = get_fee_payer_sign_payload(tx, sender)
     return recover_address(hash_signed, tx.fee_payer_signature)
@@ -305,8 +301,6 @@ def _replace_fields(
     **kwargs: object,
 ) -> TempoTransaction:
     """Return a new TempoTransaction with the given fields replaced."""
-    import attrs
-
     kw: dict[str, object] = {}
     if sender_signature is not None:
         kw["sender_signature"] = sender_signature
@@ -409,8 +403,6 @@ class Builder:
         address: BytesLike,
         storage_keys: tuple[BytesLike, ...] = (),
     ) -> Builder:
-        from .models import AccessListItem
-
         self._access_list.append(AccessListItem.create(address=address, storage_keys=storage_keys))
         return self
 

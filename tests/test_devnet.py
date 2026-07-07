@@ -8,7 +8,12 @@ import stat
 import tempfile
 from pathlib import Path
 
+import json
+import jsonmerge
+import tomlkit
 import yaml
+
+from tempo.devnet.cluster import ClusterCLI
 
 from tempo.devnet.config import DevnetConfig, ValidatorConfig
 from tempo.devnet.ports import (
@@ -23,8 +28,10 @@ from tempo.devnet.ports import (
 )
 from tempo.devnet.supervisor import (
     LOCALNET_SIGNING_KEY_SECRET,
+    apply_genesis_patch,
     generate_supervisor_config,
     write_run_script,
+    write_reth_config,
     write_secret_file,
     _build_node_args,
     _sh_quote,
@@ -441,7 +448,6 @@ class TestClusterCLI:
     """ClusterCLI instantiation and summary."""
 
     def test_node_dirs_by_moniker(self) -> None:
-        from tempo.devnet.cluster import ClusterCLI
 
         cfg = DevnetConfig(
             {
@@ -465,7 +471,6 @@ class TestClusterCLI:
             assert all(d.name in ("node0", "node1") for d in dirs)
 
     def test_rpc_urls_by_moniker(self) -> None:
-        from tempo.devnet.cluster import ClusterCLI
 
         cfg = DevnetConfig(
             {
@@ -488,7 +493,6 @@ class TestClusterCLI:
             assert "8005" in ws_url  # ws_rpc_port(8000) = 8005
 
     def test_rpc_urls_by_moniker_lookup(self) -> None:
-        from tempo.devnet.cluster import ClusterCLI
 
         cfg = DevnetConfig(
             {
@@ -510,6 +514,165 @@ class TestClusterCLI:
             assert "8014" in cli.node_rpc_url("node1")
             assert "8005" in cli.node_ws_url("node0")
             assert "8015" in cli.node_ws_url("node1")
+
+
+class TestPatches:
+    """Genesis patching, reth config, and node flag overrides."""
+
+    def test_jsonmerge_simple(self) -> None:
+
+        base = {"a": 1, "b": 2}
+        merged = jsonmerge.merge(base, {"b": 3, "c": 4})
+        assert merged == {"a": 1, "b": 3, "c": 4}
+
+    def test_jsonmerge_nested(self) -> None:
+
+        base = {"a": {"x": 1, "y": 2}, "b": 3}
+        merged = jsonmerge.merge(base, {"a": {"y": 99, "z": 100}})
+        assert merged == {"a": {"x": 1, "y": 99, "z": 100}, "b": 3}
+
+    def test_apply_genesis_patch(self) -> None:
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+
+            (data_dir / "genesis.json").write_text(
+                json.dumps({"chain_id": 1337, "config": {"extra_fields": {"epochLength": 100}}})
+            )
+
+            apply_genesis_patch(
+                data_dir,
+                {"config": {"extra_fields": {"epochLength": 50}, "someNewField": "hello"}},
+            )
+
+            updated = json.loads((data_dir / "genesis.json").read_text())
+            assert updated["chain_id"] == 1337  # unchanged
+            assert updated["config"]["extra_fields"]["epochLength"] == 50  # overridden
+            assert updated["config"]["someNewField"] == "hello"  # added
+
+    def test_apply_genesis_patch_noop_if_empty(self) -> None:
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            (data_dir / "genesis.json").write_text("{}")
+            apply_genesis_patch(data_dir, {})
+            assert (data_dir / "genesis.json").read_text() == "{}"
+
+    def test_write_reth_config(self) -> None:
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            val_dir = Path(tmpdir) / "node0"
+            val_dir.mkdir(parents=True)
+
+            write_reth_config(
+                val_dir,
+                {"p2p": {"max_inbound": 50}, "db": {"max_size": "8TB"}},
+            )
+
+            reth_path = val_dir / "reth.toml"
+            assert reth_path.exists()
+
+            with open(reth_path) as f:
+                parsed = tomlkit.load(f)
+            assert parsed["p2p"]["max_inbound"] == 50
+            assert parsed["db"]["max_size"] == "8TB"
+
+    def test_write_reth_config_noop_if_empty(self) -> None:
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            val_dir = Path(tmpdir) / "node0"
+            val_dir.mkdir(parents=True)
+            write_reth_config(val_dir, {})
+            assert not (val_dir / "reth.toml").exists()
+
+    def test_extra_flags_in_node_args(self) -> None:
+        args = _build_node_args(
+            tempo_bin="tempo",
+            host="127.0.0.1",
+            base_port=8000,
+            genesis_path="/g.json",
+            datadir="/d",
+            signing_key="/d/signing.key",
+            signing_share="/d/signing.share",
+            secret_file="/d/.secret",
+            enode_key="/d/enode.key",
+            trusted_peers=[],
+            extra_flags=["--txpool.max-tempo-authorizations", "32"],
+        )
+        assert "--txpool.max-tempo-authorizations" in args
+        idx = args.index("--txpool.max-tempo-authorizations")
+        assert args[idx + 1] == "32"
+
+    def test_patch_node_flags_in_config_roundtrip(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000, "moniker": "n0"}],
+                "patch_node_flags": ["--some-flag", "value"],
+            }
+        )
+        assert cfg.patch_node_flags == ["--some-flag", "value"]
+
+    def test_patch_genesis_in_config_roundtrip(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000, "moniker": "n0"}],
+                "patch_genesis": {"config": {"extra_fields": {"epochLength": 50}}},
+            }
+        )
+        assert cfg.patch_genesis["config"]["extra_fields"]["epochLength"] == 50
+        d = cfg.to_dict()
+        assert "patch_genesis" in d
+
+    def test_patch_reth_in_config_roundtrip(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000, "moniker": "n0"}],
+                "patch_reth": {"p2p": {"max_inbound": 50}},
+            }
+        )
+        assert cfg.patch_reth["p2p"]["max_inbound"] == 50
+        d = cfg.to_dict()
+        assert "patch_reth" in d
+
+    def test_generate_config_with_all_patches(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+                "patch_genesis": {"nonce": "0x42"},
+                "patch_reth": {"p2p": {"max_inbound": 50}},
+                "patch_node_flags": ["--txpool.max-tempo-authorizations", "32"],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            val_dir = data_dir / "node0"
+            val_dir.mkdir(parents=True)
+            (val_dir / "enode.identity").write_text("abc")
+            (val_dir / "signing.key").write_text("k")
+            (val_dir / "signing.share").write_text("s")
+            (val_dir / "enode.key").write_text("e")
+
+            (data_dir / "genesis.json").write_text(json.dumps({"chain_id": 1337}))
+
+            generate_supervisor_config(cfg, data_dir, force=True)
+
+            # Genesis patch applied
+            genesis = json.loads((data_dir / "genesis.json").read_text())
+            assert genesis["nonce"] == "0x42"
+
+            # Reth config written
+            assert (val_dir / "reth.toml").exists()
+            with open(val_dir / "reth.toml") as f:
+                reth_parsed = tomlkit.load(f)
+            assert reth_parsed["p2p"]["max_inbound"] == 50
+
+            # Extra flags in run.sh
+            run_sh = (val_dir / "run.sh").read_text()
+            assert "--txpool.max-tempo-authorizations" in run_sh
+            assert "'32'" in run_sh
 
 
 class TestFindFreeBasePorts:

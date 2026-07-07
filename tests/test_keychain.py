@@ -8,6 +8,8 @@ from tempo import Call, Signer, TempoTransaction
 from tempo.constants import ALPHA_USD, CHAIN_ID_MODERATO
 from tempo.contracts import TIP20
 from tempo.keychain import (
+    INNER_SIGNATURE_LENGTH,
+    KEYCHAIN_SIGNATURE_LENGTH,
     KEYCHAIN_SIGNATURE_TYPE,
     CallScope,
     KeyAuthorization,
@@ -266,12 +268,6 @@ class TestKeychain:
 
 class TestKeychainConstants:
     def test_constants(self):
-        from tempo.keychain import (
-            INNER_SIGNATURE_LENGTH,
-            KEYCHAIN_SIGNATURE_LENGTH,
-            KEYCHAIN_SIGNATURE_TYPE,
-        )
-
         assert KEYCHAIN_SIGNATURE_TYPE == 0x04
         assert KEYCHAIN_SIGNATURE_LENGTH == 86
         assert INNER_SIGNATURE_LENGTH == 65

@@ -12,6 +12,9 @@ from tempo.contracts import (
     TIP20_ROLES,
     AccountKeychain,
 )
+from tempo.contracts.keychain import ACCOUNT_KEYCHAIN as ACCOUNT_KEYCHAIN_VIA_KEYCHAIN
+from tempo.contracts.tip20 import TIP20 as TIP20_VIA_TIP20
+from tempo.keychain import CallScope
 from tempo.models import Call
 
 RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
@@ -194,20 +197,11 @@ class TestAccountKeychainWrapper:
 
 class TestContractConsistency:
     def test_tip20_selector_consistency(self):
-        # TIP20_CONTRACT selectors match what keychain uses
-        from tempo.keychain import CallScope
-
         cs = CallScope.transfer("0x" + "20" * 20)
         assert cs.selector == bytes(TIP20.fns.transfer.selector)
 
     def test_instance_sharing(self):
-        from tempo.contracts import TIP20 as C2
-        from tempo.contracts.tip20 import TIP20 as C1
-
-        assert C1 is C2
+        assert TIP20 is TIP20_VIA_TIP20
 
     def test_keychain_instance_sharing(self):
-        from tempo.contracts import ACCOUNT_KEYCHAIN as C2
-        from tempo.contracts.keychain import ACCOUNT_KEYCHAIN as C1
-
-        assert C1 is C2
+        assert ACCOUNT_KEYCHAIN is ACCOUNT_KEYCHAIN_VIA_KEYCHAIN
