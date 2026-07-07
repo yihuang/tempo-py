@@ -476,15 +476,11 @@ def generate_docker_compose(
         container_script = f"{CONTAINER_DATA_DIR}/{val.dir_name}/docker-run.sh"
 
         published_ports: list[str] = []
-        # Host port = base_port + offset, container port = fixed internal port
-        for port_offset, container_port in [
-            (3, _DOCKER_AUTHRPC),
-            (4, _DOCKER_HTTP_RPC),
-            (5, _DOCKER_WS_RPC),
-        ]:
-            host_port = val.base_port + port_offset
-            published_ports.append(f"{host_port}:{container_port}")
-
+        # Host port = base_port + offset, container port = fixed internal port.
+        # Restrict engine API (authrpc) to localhost by default.
+        published_ports.append(f"127.0.0.1:{val.base_port + 3}:{_DOCKER_AUTHRPC}")
+        published_ports.append(f"{val.base_port + 4}:{_DOCKER_HTTP_RPC}")
+        published_ports.append(f"{val.base_port + 5}:{_DOCKER_WS_RPC}")
         services[svc_name] = {
             "image": config.docker_image,
             "command": container_script,
