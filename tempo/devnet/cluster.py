@@ -14,24 +14,22 @@ from typing import Any
 from supervisor import xmlrpc
 from supervisor.compat import xmlrpclib
 
-from .config import DevnetConfig, ValidatorConfig
+from .config import DevnetConfig
 from .ports import http_rpc_port, ws_rpc_port
 
 
-def _find_validator_by_moniker(config: DevnetConfig, moniker: str) -> ValidatorConfig | None:
-    """Find a validator config by its moniker."""
+def _find_rpc_endpoint(config: DevnetConfig, moniker: str) -> tuple[str, int]:
+    """Resolve a moniker (validator, follow, or public node) to its host and base_port.
+
+    Raises ``KeyError`` if unknown.
+    """
     for v in config.validators:
         if v.moniker == moniker:
-            return v
-    return None
-
-
-def _find_validator_by_addr(config: DevnetConfig, addr: str) -> ValidatorConfig | None:
-    """Find a validator config by its ``ip:port`` address."""
-    for v in config.validators:
-        if v.addr_str == addr:
-            return v
-    return None
+            return v.host, v.base_port
+    for n in (*config.docker_follow_nodes, *config.docker_public_nodes):
+        if n.moniker == moniker:
+            return "127.0.0.1", n.port
+    raise KeyError(f"node {moniker!r} not found")
 
 
 class ClusterCLI:
@@ -135,19 +133,13 @@ class ClusterCLI:
 
     def node_rpc_url(self, moniker: str) -> str:
         """Get the HTTP RPC URL for a validator node by moniker."""
-        v = _find_validator_by_moniker(self.config, moniker)
-        if v is None:
-            raise KeyError(f"validator {moniker!r} not found")
-        port = http_rpc_port(v.base_port)
-        return f"http://{v.host}:{port}"
+        host, base_port = _find_rpc_endpoint(self.config, moniker)
+        return f"http://{host}:{http_rpc_port(base_port)}"
 
     def node_ws_url(self, moniker: str) -> str:
         """Get the WebSocket RPC URL for a validator node by moniker."""
-        v = _find_validator_by_moniker(self.config, moniker)
-        if v is None:
-            raise KeyError(f"validator {moniker!r} not found")
-        port = ws_rpc_port(v.base_port)
-        return f"ws://{v.host}:{port}"
+        host, base_port = _find_rpc_endpoint(self.config, moniker)
+        return f"ws://{host}:{ws_rpc_port(base_port)}"
 
     def node_dirs(self) -> list[Path]:
         """List all validator data directories (named by moniker)."""
