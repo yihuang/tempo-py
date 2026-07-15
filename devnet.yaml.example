@@ -92,6 +92,9 @@ validators:
 # ---------------------------------------------------------------------------
 # Docker settings (optional — only used with --gen-compose-file)
 # ---------------------------------------------------------------------------
+#
+# == Single-network mode (default, backward-compatible) ==
+#
 # Each validator runs in its own container with a static IP on ``subnet`` so
 # the consensus peer addresses baked into genesis (``<static_ip>:8000``) are
 # reachable across containers.  HTTP/WS RPC is published to the host at
@@ -100,6 +103,57 @@ validators:
 #   image: ghcr.io/tempoxyz/tempo:latest   # Official Tempo image for validators
 #   network: tempo-devnet                  # Docker bridge network name
 #   subnet: 10.88.0.0/24                   # Bridge subnet; validator i gets host octet 10+i
+#
+# == Two-network mode (production topology) ==
+#
+# Emulates the production deployment topology with separate private and public
+# Docker networks:
+#
+#   Validator Network (private) — 10.88.0.0/24
+#     └── Validator P2P traffic only (consensus, execution P2P)
+#     └── Validators bind --consensus.listen-address to this network's IP
+#     └── Genesis bakes these private IPs as consensus peer addresses
+#
+#   Public Network — 10.89.0.0/24
+#     ├── Validators bind HTTP/WS RPC to this network's IP (published to host)
+#     ├── Follow nodes (read-only) sync via WS from validators
+#     └── P2P proxies serve block data on this network
+#
+# Network topology diagram (two-network mode)::
+#
+#     Validator Network (10.88.0.0/24)     Public Network (10.89.0.0/24)
+#     ┌─────────────────────────────┐     ┌──────────────────────────────┐
+#     │ validator0 (10.88.0.10)     │     │ validator0 (10.89.0.10)      │
+#     │   P2P only                  │────►│   HTTP/WS RPC                │
+#     │ validator1 (10.88.0.11)     │     │ validator1 (10.89.0.11)      │
+#     │   P2P only                  │────►│   HTTP/WS RPC                │
+#     │ validator2 (10.88.0.12)     │     │ validator2 (10.89.0.12)      │
+#     │   ⋮                         │     │   ⋮                          │
+#     └─────────────────────────────┘     │ follower0 (10.89.0.14)       │
+#                                         │   --follow ws://10.89.0.10   │
+#                                         │ proxy0 (10.89.0.15)          │
+#                                         │   p2p-proxy via              │
+#                                         │   http://10.89.0.10:8004     │
+#                                         └──────────────────────────────┘
+#
+# docker:
+#   image: ghcr.io/tempoxyz/tempo:latest   # Official Tempo image for all services
+#   validator_network:
+#     name: tempo-validator-net            # Private P2P Docker network
+#     subnet: 10.88.0.0/24                # Validator i gets IP 10.88.0.<10+i>
+#   public_network:
+#     name: tempo-public-net              # Public-facing Docker network
+#     subnet: 10.89.0.0/24                # Node i gets IP 10.89.0.<10+i>
+#
+#   # Optional read-only follow nodes (synced from validators via WS)
+#   follow_nodes:
+#     - moniker: follower0
+#       port: 9000                         # base_port; RPC at 9004, WS at 9005
+#
+#   # Optional P2P proxy services (lightweight block data serving)
+#   p2p_proxies:
+#     - moniker: proxy0
+#       port: 7000                         # P2P proxy listen port
 
 # ---------------------------------------------------------------------------
 # Config patches — applied after ``tempo-xtask generate-localnet`` finishes

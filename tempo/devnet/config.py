@@ -31,6 +31,15 @@ DOCKER_WS_RPC_PORT = 8005
 DEFAULT_DOCKER_SUBNET = "10.88.0.0/24"
 DOCKER_IP_HOST_OCTET_BASE = 10
 
+# Default public-facing Docker network for RPC/WS exposure (used only in
+# two-network topology; single-network mode uses only the validator network).
+DEFAULT_DOCKER_PUBLIC_SUBNET = "10.89.0.0/24"
+DEFAULT_DOCKER_PUBLIC_NETWORK = "tempo-public-net"
+DOCKER_PUBLIC_IP_HOST_OCTET_BASE = 10
+
+# Hardfork timestamp attribute names (t0_time … t8_time)
+HARDFORK_ATTRS = [f"t{i}_time" for i in range(9)]
+
 
 class ValidatorConfig:
     """Configuration for a single validator node.
@@ -108,6 +117,36 @@ class ValidatorConfig:
         )
 
 
+class FollowNodeConfig:
+    """Configuration for a read-only follow node in two-network mode."""
+
+    def __init__(self, moniker: str, port: int = 9000) -> None:
+        self.moniker = moniker
+        self.port = port
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"moniker": self.moniker, "port": self.port}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> FollowNodeConfig:
+        return cls(moniker=d["moniker"], port=d.get("port", 9000))
+
+
+class P2PProxyConfig:
+    """Configuration for a P2P proxy in two-network mode."""
+
+    def __init__(self, moniker: str, port: int = 7000) -> None:
+        self.moniker = moniker
+        self.port = port
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"moniker": self.moniker, "port": self.port}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> P2PProxyConfig:
+        return cls(moniker=d["moniker"], port=d.get("port", 7000))
+
+
 class DevnetConfig:
     """Complete devnet configuration loaded from a YAML file."""
 
@@ -126,7 +165,7 @@ class DevnetConfig:
         self.no_pairwise_liquidity: bool = data.get("no_pairwise_liquidity", False)
 
         # Hardfork timestamps (default 0 = active at genesis)
-        for hf in [f"t{i}_time" for i in range(9)]:
+        for hf in HARDFORK_ATTRS:
             setattr(self, hf, data.get(hf, 0))
 
         # Optional patches
@@ -145,13 +184,13 @@ class DevnetConfig:
             raise TypeError("patch_node_flags must be a list of strings")
         self.patch_node_flags: list[str] = patch_node_flags
 
-        # Docker settings
+        # Docker settings + topology
         docker_raw = data.get("docker") or {}
         if not isinstance(docker_raw, dict):
             raise TypeError("docker must be a mapping (dict)")
         self.docker_image: str = docker_raw.get("image", "ghcr.io/tempoxyz/tempo:latest")
-        self.docker_network: str = docker_raw.get("network", "tempo-devnet")
-        self.docker_subnet: str = docker_raw.get("subnet", DEFAULT_DOCKER_SUBNET)
+        self._init_docker_topology(docker_raw)
+
         # Parse validators
         raw_validators = data.get("validators", [])
         if not raw_validators:
@@ -164,6 +203,39 @@ class DevnetConfig:
             ]
 
         self.validators = [ValidatorConfig.from_dict(v) for v in raw_validators]
+
+    def _init_docker_topology(self, docker_raw: dict[str, Any]) -> None:
+        """Configure Docker network topology from raw ``docker`` section.
+
+        Detects two-network mode when ``validator_network`` or ``public_network``
+        keys are present; otherwise falls back to single-network (legacy) mode.
+        """
+        self.docker_topology: str = "single"
+        self.docker_network: str = docker_raw.get("network", "tempo-devnet")
+        self.docker_subnet: str = docker_raw.get("subnet", DEFAULT_DOCKER_SUBNET)
+        self.docker_validator_network: dict[str, str] = {}
+        self.docker_public_network: dict[str, str] = {}
+        self.docker_follow_nodes: list[FollowNodeConfig] = []
+        self.docker_p2p_proxies: list[P2PProxyConfig] = []
+
+        if "validator_network" not in docker_raw and "public_network" not in docker_raw:
+            return
+
+        self.docker_topology = "two-network"
+        self.docker_validator_network = docker_raw.get("validator_network") or {
+            "name": self.docker_network,
+            "subnet": self.docker_subnet,
+        }
+        self.docker_public_network = docker_raw.get("public_network") or {
+            "name": DEFAULT_DOCKER_PUBLIC_NETWORK,
+            "subnet": DEFAULT_DOCKER_PUBLIC_SUBNET,
+        }
+        # In two-network mode, docker_network / docker_subnet reflect the
+        # validator network (used for genesis peer addressing).
+        self.docker_network = self.docker_validator_network.get("name", "tempo-validator-net")
+        self.docker_subnet = self.docker_validator_network.get("subnet", DEFAULT_DOCKER_SUBNET)
+        self.docker_follow_nodes = [FollowNodeConfig.from_dict(f) for f in (docker_raw.get("follow_nodes") or [])]
+        self.docker_p2p_proxies = [P2PProxyConfig.from_dict(p) for p in (docker_raw.get("p2p_proxies") or [])]
 
     @property
     def validators_arg(self) -> str:
@@ -186,6 +258,33 @@ class DevnetConfig:
     def docker_validators_arg(self) -> str:
         """``--validators`` for a Docker devnet: container static IPs, not host ports."""
         return ",".join(self.docker_validator_addr(i) for i in range(len(self.validators)))
+
+    @property
+    def docker_is_two_network(self) -> bool:
+        """Whether the Docker topology uses two separate networks (validator + public)."""
+        return self.docker_topology == "two-network"
+
+    @property
+    def docker_public_network_name(self) -> str:
+        """Name of the public-facing Docker network (two-network mode)."""
+        return self.docker_public_network.get("name", DEFAULT_DOCKER_PUBLIC_NETWORK)
+
+    @property
+    def docker_public_subnet_cidr(self) -> str:
+        """CIDR of the public-facing Docker network."""
+        return self.docker_public_network.get("subnet", DEFAULT_DOCKER_PUBLIC_SUBNET)
+
+    @property
+    def docker_validator_network_name(self) -> str:
+        """Name of the private validator Docker network (two-network mode)."""
+        if self.docker_is_two_network:
+            return self.docker_validator_network.get("name", self.docker_network)
+        return self.docker_network
+
+    def docker_public_ip(self, index: int) -> str:
+        """Static public IP for Docker node ``index`` on the public-facing network."""
+        network = ipaddress.ip_network(self.docker_public_subnet_cidr, strict=False)
+        return str(network.network_address + DOCKER_PUBLIC_IP_HOST_OCTET_BASE + index)
 
     @classmethod
     def load(cls, path: str | Path) -> DevnetConfig:
@@ -222,7 +321,7 @@ class DevnetConfig:
             args.append("--no-extra-tokens")
         if self.no_pairwise_liquidity:
             args.append("--no-pairwise-liquidity")
-        for hf in [f"t{i}_time" for i in range(9)]:
+        for hf in HARDFORK_ATTRS:
             val = getattr(self, hf)
             if val != 0:
                 args.extend([f"--{hf.replace('_', '-')}", str(val)])
@@ -246,7 +345,7 @@ class DevnetConfig:
             d["no_extra_tokens"] = True
         if self.no_pairwise_liquidity:
             d["no_pairwise_liquidity"] = True
-        for hf in [f"t{i}_time" for i in range(9)]:
+        for hf in HARDFORK_ATTRS:
             val = getattr(self, hf)
             if val != 0:
                 d[hf] = val
@@ -256,9 +355,27 @@ class DevnetConfig:
             d["patch_reth"] = self.patch_reth
         if self.patch_node_flags:
             d["patch_node_flags"] = self.patch_node_flags
-        d["docker"] = {
-            "image": self.docker_image,
-            "network": self.docker_network,
-            "subnet": self.docker_subnet,
-        }
+        if self.docker_is_two_network:
+            docker_dict: dict[str, Any] = {
+                "image": self.docker_image,
+                "validator_network": {
+                    "name": self.docker_validator_network_name,
+                    "subnet": self.docker_subnet,
+                },
+                "public_network": {
+                    "name": self.docker_public_network_name,
+                    "subnet": self.docker_public_subnet_cidr,
+                },
+            }
+            if self.docker_follow_nodes:
+                docker_dict["follow_nodes"] = [f.to_dict() for f in self.docker_follow_nodes]
+            if self.docker_p2p_proxies:
+                docker_dict["p2p_proxies"] = [p.to_dict() for p in self.docker_p2p_proxies]
+            d["docker"] = docker_dict
+        else:
+            d["docker"] = {
+                "image": self.docker_image,
+                "network": self.docker_network,
+                "subnet": self.docker_subnet,
+            }
         return d

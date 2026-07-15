@@ -15,7 +15,12 @@ import yaml
 
 from tempo.devnet.cluster import ClusterCLI
 
-from tempo.devnet.config import DevnetConfig, ValidatorConfig
+from tempo.devnet.config import (
+    DevnetConfig,
+    FollowNodeConfig,
+    P2PProxyConfig,
+    ValidatorConfig,
+)
 from tempo.devnet.ports import (
     PORTS_PER_NODE,
     authrpc_port,
@@ -36,9 +41,33 @@ from tempo.devnet.supervisor import (
     write_reth_config,
     write_secret_file,
     _build_node_args,
+    _docker_follow_node_command,
     _docker_node_command,
+    _docker_node_two_network_command,
+    _docker_p2p_proxy_command,
     _sh_quote,
 )
+
+
+# ---------------------------------------------------------------------------
+# Test helpers — reduce boilerplate for setting up validator directories
+# ---------------------------------------------------------------------------
+
+
+def _make_val_dirs(
+    data_dir: Path,
+    cfg: DevnetConfig,
+    enode_id: str = "abc123",
+) -> None:
+    """Create validator subdirectories with dummy key files and genesis.json."""
+    for val in cfg.validators:
+        d = data_dir / val.dir_name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "enode.identity").write_text(enode_id)
+        (d / "signing.key").write_text("k")
+        (d / "signing.share").write_text("s")
+        (d / "enode.key").write_text("e")
+    (data_dir / "genesis.json").write_text("{}")
 
 
 class TestPorts:
@@ -265,6 +294,104 @@ class TestDevnetConfig:
         assert "--t6-time" in args
         assert "200" in args
 
+    # ------------------------------------------------------------------
+    # Two-network topology tests
+    # ------------------------------------------------------------------
+
+    def test_two_network_detection(self) -> None:
+        """validator_network key triggers two-network topology."""
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000}],
+                "docker": {
+                    "validator_network": {
+                        "name": "priv-net",
+                        "subnet": "10.88.0.0/24",
+                    },
+                    "public_network": {
+                        "name": "pub-net",
+                        "subnet": "10.89.0.0/24",
+                    },
+                },
+            }
+        )
+        assert cfg.docker_is_two_network
+        assert cfg.docker_topology == "two-network"
+        assert cfg.docker_validator_network_name == "priv-net"
+        assert cfg.docker_public_network_name == "pub-net"
+        assert cfg.docker_subnet == "10.88.0.0/24"
+        assert cfg.docker_public_subnet_cidr == "10.89.0.0/24"
+
+    def test_two_network_public_ip(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000}],
+                "docker": {
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.99.0.0/24"},
+                },
+            }
+        )
+        assert cfg.docker_public_ip(0) == "10.99.0.10"
+        assert cfg.docker_public_ip(5) == "10.99.0.15"
+
+    def test_two_network_follow_nodes(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000}],
+                "docker": {
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.89.0.0/24"},
+                    "follow_nodes": [
+                        {"moniker": "follower0", "port": 9000},
+                    ],
+                    "p2p_proxies": [
+                        {"moniker": "proxy0", "port": 7000},
+                    ],
+                },
+            }
+        )
+        assert cfg.docker_is_two_network
+        assert len(cfg.docker_follow_nodes) == 1
+        assert len(cfg.docker_p2p_proxies) == 1
+        assert cfg.docker_follow_nodes[0].moniker == "follower0"
+        assert cfg.docker_p2p_proxies[0].moniker == "proxy0"
+
+    def test_two_network_to_dict_roundtrip(self) -> None:
+        data = {
+            "validators": [{"host": "127.0.0.1", "port": 8000}],
+            "docker": {
+                "validator_network": {"name": "priv-net", "subnet": "10.88.0.0/24"},
+                "public_network": {"name": "pub-net", "subnet": "10.89.0.0/24"},
+                "follow_nodes": [{"moniker": "f0", "port": 9000}],
+                "p2p_proxies": [{"moniker": "p0", "port": 7000}],
+            },
+        }
+        cfg1 = DevnetConfig(data)
+        cfg2 = DevnetConfig(cfg1.to_dict())
+        assert cfg2.docker_is_two_network
+        assert cfg2.docker_validator_network_name == "priv-net"
+        assert cfg2.docker_public_network_name == "pub-net"
+        assert cfg2.docker_subnet == "10.88.0.0/24"
+        assert cfg2.docker_public_subnet_cidr == "10.89.0.0/24"
+        assert len(cfg2.docker_follow_nodes) == 1
+        assert cfg2.docker_follow_nodes[0].moniker == "f0"
+        assert len(cfg2.docker_p2p_proxies) == 1
+        assert cfg2.docker_p2p_proxies[0].moniker == "p0"
+
+    def test_legacy_single_network_works(self) -> None:
+        """Setting docker.network/subnet (no validator_network) uses single-network mode."""
+        cfg = DevnetConfig(
+            {
+                "validators": [{"host": "127.0.0.1", "port": 8000}],
+                "docker": {"network": "my-net", "subnet": "10.10.0.0/24"},
+            }
+        )
+        assert not cfg.docker_is_two_network
+        assert cfg.docker_topology == "single"
+        assert cfg.docker_network == "my-net"
+        assert cfg.docker_subnet == "10.10.0.0/24"
+
 
 class TestBuildNodeArgs:
     """_build_node_args — argument list construction."""
@@ -443,16 +570,7 @@ class TestSupervisorConfig:
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
 
-            # Create validator dirs named by moniker (as they'd be after rename)
-            for val in cfg.validators:
-                val_dir = data_dir / val.dir_name
-                val_dir.mkdir(parents=True)
-                (val_dir / "enode.identity").write_text("abc123")
-                (val_dir / "signing.key").write_text("dummy")
-                (val_dir / "signing.share").write_text("dummy")
-                (val_dir / "enode.key").write_text("dummy")
-
-            (data_dir / "genesis.json").write_text("{}")
+            _make_val_dirs(data_dir, cfg)
 
             # Generate supervisor config
             dst = generate_supervisor_config(cfg, data_dir)
@@ -499,13 +617,7 @@ class TestSupervisorConfig:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
-            val_dir = data_dir / "node0"
-            val_dir.mkdir(parents=True)
-            (val_dir / "enode.identity").write_text("abc")
-            (val_dir / "signing.key").write_text("k")
-            (val_dir / "signing.share").write_text("s")
-            (val_dir / "enode.key").write_text("e")
-            (data_dir / "genesis.json").write_text("{}")
+            _make_val_dirs(data_dir, cfg, enode_id="abc")
 
             dst = generate_supervisor_config(cfg, data_dir)
             content = dst.read_text()
@@ -779,14 +891,7 @@ class TestDockerCompose:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
-            for val in cfg.validators:
-                d = data_dir / val.dir_name
-                d.mkdir(parents=True)
-                (d / "enode.identity").write_text("abc")
-                (d / "signing.key").write_text("k")
-                (d / "signing.share").write_text("s")
-                (d / "enode.key").write_text("e")
-            (data_dir / "genesis.json").write_text("{}")
+            _make_val_dirs(data_dir, cfg)
 
             dst = generate_docker_compose(cfg, data_dir, force=True)
             assert dst.exists()
@@ -828,14 +933,7 @@ class TestDockerCompose:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
-            for val in cfg.validators:
-                d = data_dir / val.dir_name
-                d.mkdir(parents=True)
-                (d / "enode.identity").write_text("abc")
-                (d / "signing.key").write_text("k")
-                (d / "signing.share").write_text("s")
-                (d / "enode.key").write_text("e")
-            (data_dir / "genesis.json").write_text("{}")
+            _make_val_dirs(data_dir, cfg)
 
             args = _docker_node_command(cfg, cfg.validators[0], data_dir)
             cmd = " ".join(args)
@@ -884,13 +982,7 @@ class TestDockerCompose:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             data_dir = Path(tmpdir)
-            d = data_dir / "node0"
-            d.mkdir(parents=True)
-            (d / "enode.identity").write_text("abc")
-            (d / "signing.key").write_text("k")
-            (d / "signing.share").write_text("s")
-            (d / "enode.key").write_text("e")
-            (data_dir / "genesis.json").write_text("{}")
+            _make_val_dirs(data_dir, cfg)
 
             generate_docker_compose(cfg, data_dir, force=True)
 
@@ -900,6 +992,261 @@ class TestDockerCompose:
             content = script.read_text()
             assert "(docker)" in content
             assert "exec" in content
+
+    # ------------------------------------------------------------------
+    # Two-network topology command builders
+    # ------------------------------------------------------------------
+
+    def test_docker_node_two_network_command_uses_network_ips(self) -> None:
+        """Two-network mode: validator binds ALL services to validator-network IP only."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+                "docker": {
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.89.0.0/24"},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            _make_val_dirs(data_dir, cfg)
+
+            args = _docker_node_two_network_command(cfg, cfg.validators[0], data_dir, 0)
+            cmd = " ".join(args)
+
+            # P2P binds to validator-network private IP
+            assert "10.88.0.10:8000" in cmd  # consensus P2P on validator IP
+            # All services bind to validator IP — NO public IP references
+            assert "--http.addr 10.88.0.10" in cmd
+            assert "--ws.addr 10.88.0.10" in cmd
+            assert "10.88.0.10:8002" in cmd  # consensus metrics
+            # No public-network IP in validator args
+            assert "10.89.0." not in cmd
+            # Trusted-peers use Docker service names
+            assert "@node1:8001" in cmd
+
+    def test_docker_node_two_network_command_second_validator(self) -> None:
+        """Second validator also uses validator-network IP only."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+                "docker": {
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.89.0.0/24"},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            _make_val_dirs(data_dir, cfg)
+
+            args = _docker_node_two_network_command(cfg, cfg.validators[1], data_dir, 1)
+            cmd = " ".join(args)
+
+            # All on validator IP only
+            assert "10.88.0.11:8000" in cmd
+            assert "--http.addr 10.88.0.11" in cmd
+            assert "10.89.0." not in cmd
+
+    def test_docker_follow_node_command(self) -> None:
+        """Follow node syncs from validator on validator-network IP via WS."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+                "docker": {
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.89.0.0/24"},
+                    "follow_nodes": [{"moniker": "f0", "port": 9000}],
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            _make_val_dirs(data_dir, cfg)
+
+            args = _docker_follow_node_command(cfg, cfg.docker_follow_nodes[0], data_dir)
+            cmd = " ".join(args)
+
+            # Syncs from validator0 on the validator network (private IP)
+            assert "--follow" in cmd
+            assert "ws://10.88.0.10:8005" in cmd
+            # No BLS signing share
+            assert "--consensus.signing-share" not in cmd
+            # Exposes RPC on all interfaces (reachable from public network)
+            assert "--http.port 8004" in cmd
+            assert "--ws.port 8005" in cmd
+
+    def test_docker_p2p_proxy_command(self) -> None:
+        """P2P proxy connects to validator on validator-network IP via RPC."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+                "docker": {
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.89.0.0/24"},
+                    "p2p_proxies": [{"moniker": "p0", "port": 7000}],
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            (data_dir / "node0").mkdir(parents=True)
+            (data_dir / "genesis.json").write_text("{}")
+
+            args = _docker_p2p_proxy_command(cfg, cfg.docker_p2p_proxies[0], data_dir)
+            cmd = " ".join(args)
+
+            # Uses p2p-proxy subcommand
+            assert "p2p-proxy" in cmd
+            # RPC URL points to validator0 on validator-network IP (private)
+            assert "--rpc-url" in cmd
+            assert "http://10.88.0.10:8004" in cmd
+
+    def test_two_network_compose_generation(self) -> None:
+        """Two-network docker-compose: validators on validator-net only, services dual-homed."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+                "docker": {
+                    "image": "tempo:two-net",
+                    "validator_network": {
+                        "name": "vnet",
+                        "subnet": "10.88.0.0/24",
+                    },
+                    "public_network": {
+                        "name": "pnet",
+                        "subnet": "10.89.0.0/24",
+                    },
+                    "follow_nodes": [{"moniker": "follower0", "port": 9000}],
+                    "p2p_proxies": [{"moniker": "proxy0", "port": 7000}],
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            _make_val_dirs(data_dir, cfg)
+
+            dst = generate_docker_compose(cfg, data_dir, force=True)
+            assert dst.exists()
+            content = dst.read_text()
+
+            # Two networks declared
+            assert "vnet" in content
+            assert "pnet" in content
+
+            parsed = yaml.safe_load(content)
+
+            # Both networks defined
+            assert "vnet" in parsed["networks"]
+            assert "pnet" in parsed["networks"]
+            assert parsed["networks"]["vnet"]["ipam"]["config"][0]["subnet"] == "10.88.0.0/24"
+            assert parsed["networks"]["pnet"]["ipam"]["config"][0]["subnet"] == "10.89.0.0/24"
+
+            # Validators on validator network ONLY
+            s0 = parsed["services"]["node0"]
+            assert "vnet" in s0["networks"]
+            assert "pnet" not in s0["networks"]
+            assert s0["networks"]["vnet"]["ipv4_address"] == "10.88.0.10"
+
+            s1 = parsed["services"]["node1"]
+            assert "vnet" in s1["networks"]
+            assert "pnet" not in s1["networks"]
+            assert s1["networks"]["vnet"]["ipv4_address"] == "10.88.0.11"
+
+            # Follow node dual-homed: vnet for WS sync, pnet for RPC
+            assert "follower0" in parsed["services"]
+            f0 = parsed["services"]["follower0"]
+            assert "vnet" in f0["networks"]
+            assert "pnet" in f0["networks"]
+            assert f0["networks"]["vnet"]["ipv4_address"] == "10.88.0.12"
+            assert f0["networks"]["pnet"]["ipv4_address"] == "10.89.0.12"
+            # Published ports use follow node's own base_port
+            assert "9004:8004" in content
+            assert "9005:8005" in content
+
+            # P2P proxy dual-homed: vnet for RPC access, pnet for P2P
+            assert "proxy0" in parsed["services"]
+            p0 = parsed["services"]["proxy0"]
+            assert "vnet" in p0["networks"]
+            assert "pnet" in p0["networks"]
+            assert p0["networks"]["vnet"]["ipv4_address"] == "10.88.0.13"
+            assert p0["networks"]["pnet"]["ipv4_address"] == "10.89.0.13"
+
+    def test_two_network_docker_run_scripts_written(self) -> None:
+        """Two-network mode writes docker-run.sh for validators, follow nodes, and proxies."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+                "docker": {
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.89.0.0/24"},
+                    "follow_nodes": [{"moniker": "f0", "port": 9000}],
+                    "p2p_proxies": [{"moniker": "p0", "port": 7000}],
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            _make_val_dirs(data_dir, cfg)
+
+            generate_docker_compose(cfg, data_dir, force=True)
+
+            # Validator run script
+            assert (data_dir / "node0" / "docker-run.sh").exists()
+            assert (data_dir / "node0" / "docker-run.sh").stat().st_mode & stat.S_IXUSR
+
+            # Follow node run script
+            assert (data_dir / "f0" / "docker-run.sh").exists()
+            assert (data_dir / "f0" / "docker-run.sh").stat().st_mode & stat.S_IXUSR
+
+            # P2P proxy run script
+            assert (data_dir / "p0" / "docker-run.sh").exists()
+            assert (data_dir / "p0" / "docker-run.sh").stat().st_mode & stat.S_IXUSR
+
+    def test_two_network_image_in_compose(self) -> None:
+        """Two-network mode uses the configured Docker image."""
+        cfg = DevnetConfig(
+            {
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                ],
+                "docker": {
+                    "image": "custom-tempo:v2",
+                    "validator_network": {"subnet": "10.88.0.0/24"},
+                    "public_network": {"subnet": "10.89.0.0/24"},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            _make_val_dirs(data_dir, cfg)
+
+            dst = generate_docker_compose(cfg, data_dir, force=True)
+            content = dst.read_text()
+            assert "custom-tempo:v2" in content
 
 
 class TestFindFreeBasePorts:
