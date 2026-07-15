@@ -684,9 +684,7 @@ def _docker_public_node_command(
             continue
         proxy_host = proxy.moniker
         proxy_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
-        trusted_peers.append(
-            f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}"
-        )
+        trusted_peers.append(f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}")
 
     args = _build_follow_node_args(
         config.tempo_bin,
