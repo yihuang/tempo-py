@@ -613,13 +613,10 @@ def generate_docker_compose(
 
     **Two-network mode** (``config.docker_is_two_network``):
     Emulates the production deployment topology:
-    - Validators are dual-homed on a private validator network (P2P) and a
-      public-facing network (RPC/WS).
-    - P2P binds to the private validator-network IP; RPC/WS binds to the
-      public-network IP.
-    - Follow nodes (read-only) attach to the public network only, syncing
-      via ``--follow ws://...`` from a validator.
-    - P2P proxies attach to the public network only, serving block data.
+    - Validators are on the private validator network only (not reachable from the public network).
+      All services (P2P, RPC/WS, metrics) bind to the validator-network IP.
+    - Follow nodes (read-only) are dual-homed: validator network for WS sync, public network for RPC/WS.
+    - P2P proxies are dual-homed: validator network for RPC access, public network for P2P exposure.
 
     A ``docker-run.sh`` wrapper script is written into each validator
     directory; the docker-compose command calls it via the mounted volume.
