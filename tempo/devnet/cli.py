@@ -111,7 +111,7 @@ def init(
         data: Path to the root data directory.
         config: Path to the YAML configuration file.
         force: Overwrite existing data directory.
-        gen_compose_file: Also generate a ``docker-compose.yml``.
+        gen_compose_file: Also generate a ``docker-compose.yaml``.
         **kwargs: Additional overrides for config fields (e.g. ``chain_id=1337``).
     """
     data_dir = Path(data).resolve()
@@ -165,7 +165,7 @@ def init(
     sup_dst = generate_supervisor_config(cfg, data_dir, force=True)
     print(f"\nSupervisor config written to: {sup_dst}")
 
-    # Optionally generate docker-compose.yml
+    # Optionally generate docker-compose.yaml
     if gen_compose_file:
         compose_dst = generate_docker_compose(cfg, data_dir, force=True)
         print(f"Docker Compose file written to: {compose_dst}")

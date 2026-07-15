@@ -1,0 +1,41 @@
+# Single-Network Docker Devnet
+#
+# Validator nodes on a single Docker bridge network.
+# Minimal, simple to spawn — ideal for CI, smoke tests, and fast iteration.
+#
+# Usage:
+#   tempo-devnet init --data ./data --config examples/single-network.yaml --gen-compose-file
+#   docker compose -f ./data/docker-compose.yaml up -d
+#
+# Prerequisites:
+#   cargo build --profile profiling --bin tempo-xtask
+#   docker buildx bake tempo --load
+#   export PATH=$PWD/target/profiling:$PATH
+
+chain_id: 1337
+accounts: 50
+epoch_length: 100
+gas_limit: 500000000
+seed: 42
+
+validators:
+  - host: 127.0.0.1
+    port: 8000
+    moniker: node0
+  - host: 127.0.0.1
+    port: 8010
+    moniker: node1
+  - host: 127.0.0.1
+    port: 8020
+    moniker: node2
+  - host: 127.0.0.1
+    port: 8030
+    moniker: node3
+
+no_extra_tokens: true
+no_pairwise_liquidity: true
+
+docker:
+  image: ghcr.io/tempoxyz/tempo:latest
+  network: tempo-devnet
+  subnet: 10.88.0.0/24

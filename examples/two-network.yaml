@@ -1,0 +1,93 @@
+# Two-Network Production Topology
+#
+# Validators isolated on a private network; periphery services bridge to a
+# public-facing network.  Emulates a real production deployment.
+#
+# Network Layout:
+#
+#   Validator Network (10.88.0.0/24)      Public Network (10.89.0.0/24)
+#   ┌──────────────────────────────┐    ┌──────────────────────────────────┐
+#   │ node0 (10.88.0.10)           │    │ follower0 (10.89.0.14)           │
+#   │   P2P + RPC + WS (internal) │WS──┤   RPC/WS, --follow ws://node0   │
+#   │ node1 (10.88.0.11)           │    │ proxy0 (10.89.0.15)             │
+#   │ node2 (10.88.0.12)           │RPC─┤   p2p-proxy, serves blocks      │
+#   │ node3 (10.88.0.13)           │    │ public0 (10.89.0.16)            │
+#   │   validator network only     │P2P─┤   full node, syncs from proxy  │
+#   │   no public network access   │    └──────────────────────────────────┘
+#   └──────────────────────────────┘
+#
+# Data flow:
+#   Validators produce blocks on the private network.
+#   Proxy fetches blocks via RPC from node0, serves them over P2P.
+#   Follow node syncs from node0 via WS, exposes RPC/WS publicly.
+#   Public node peers with proxy via P2P, syncs blocks and exposes RPC/WS.
+#
+# Published ports on host:
+#   node0     HTTP :8004  WS :8005
+#   node1     HTTP :8014  WS :8015
+#   node2     HTTP :8024  WS :8025
+#   node3     HTTP :8034  WS :8035
+#   follower0 HTTP :9004  WS :9005
+#   proxy0    P2P  :7001
+#   public0   HTTP :6004  WS :6005
+#
+# Usage:
+#   tempo-devnet init --data ./data --config examples/two-network.yaml --gen-compose-file
+#   docker compose -f ./data/docker-compose.yaml up -d
+#
+# Verify:
+#   curl http://127.0.0.1:6004 -X POST -H "Content-Type: application/json" \
+#     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+#
+# Prerequisites:
+#   cargo build --profile profiling --bin tempo-xtask
+#   docker buildx bake tempo --load
+#   export PATH=$PWD/target/profiling:$PATH
+
+chain_id: 1337
+accounts: 100
+epoch_length: 100
+gas_limit: 500000000
+seed: 42
+
+validators:
+  - host: 127.0.0.1
+    port: 8000
+    moniker: node0
+  - host: 127.0.0.1
+    port: 8010
+    moniker: node1
+  - host: 127.0.0.1
+    port: 8020
+    moniker: node2
+  - host: 127.0.0.1
+    port: 8030
+    moniker: node3
+
+docker:
+  image: ghcr.io/tempoxyz/tempo:latest
+
+  # Private validator network — P2P and internal RPC/WS
+  validator_network:
+    name: tempo-validator-net
+    subnet: 10.88.0.0/24
+
+  # Public-facing network — external RPC/WS and P2P
+  public_network:
+    name: tempo-public-net
+    subnet: 10.89.0.0/24
+
+  # Read-only follow node (syncs from validator0 via WS on validator network)
+  follow_nodes:
+    - moniker: follower0
+      port: 9000
+
+  # P2P proxy (serves block data, syncs from validator0 via RPC on validator network)
+  p2p_proxies:
+    - moniker: proxy0
+      port: 7000
+
+  # Public full node: public network only, syncs blocks via P2P from the proxy
+  public_nodes:
+    - moniker: public0
+      port: 6000

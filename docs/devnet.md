@@ -39,6 +39,10 @@ tempo-devnet init --data ./data --config ./devnet.yaml
 tempo-devnet start --data ./data
 ```
 
+> **See also:** Ready-to-use examples in the ``examples/`` directory for
+> different deployment patterns (single-network, two-network, native mode,
+> custom patches, etc.).
+
 ## Deployment Modes
 
 The devnet supports two deployment modes:
@@ -115,14 +119,14 @@ data/node1/node.log
 Generate the cluster and start it with ``docker compose``:
 
 ```bash
-# Generate genesis + docker-compose.yml
+# Generate genesis + docker-compose.yaml
 tempo-devnet init --data ./data --config ./devnet.yaml --gen-compose-file
 
 # Start the cluster
-docker compose -f ./data/docker-compose.yml up -d
+docker compose -f ./data/docker-compose.yaml up -d
 
 # Tail logs
-docker compose -f ./data/docker-compose.yml logs -f
+docker compose -f ./data/docker-compose.yaml logs -f
 ```
 
 ### Internal Ports (Container)
@@ -141,7 +145,7 @@ container has its own network namespace):
 
 ### Published Ports (Host)
 
-Host ports use the ``base_port`` offset scheme to avoid conflicts:
+In single-network mode (default), host ports use the ``base_port`` offset scheme:
 
 | Validator | HTTP RPC       | WebSocket      | Engine API             |
 |-----------|----------------|----------------|------------------------|
@@ -150,11 +154,79 @@ Host ports use the ``base_port`` offset scheme to avoid conflicts:
 | node2     | ``8024:8004``  | ``8025:8005``  | ``127.0.0.1:8023:8003`` |
 | node3     | ``8034:8004``  | ``8035:8005``  | ``127.0.0.1:8033:8003`` |
 
+### Two-Network (Production Topology) Mode
+
+When ``docker.validator_network`` is set, the devnet uses a **private validator
+network + public-facing network** topology that mirrors production deployments.
+
+#### Network Layout
+
+::
+
+    Validator Network (10.88.0.0/24)     Public Network (10.89.0.0/24)
+    ┌──────────────────────────────┐    ┌──────────────────────────────────┐
+    │ validator0 (10.88.0.10)      │    │ follower0 (10.89.0.13)           │
+    │   P2P + RPC + WS (internal) │WS──┤   RPC/WS for external users     │
+    │ validator1 (10.88.0.11)      │    │   --follow ws://10.88.0.10      │
+    │   P2P + RPC + WS (internal) │    │                                  │
+    │ validator2 (10.88.0.12)      │    │ proxy0 (10.89.0.14)             │
+    │   P2P + RPC + WS (internal) │RPC─┤   p2p-proxy for external peers  │
+    └──────────────────────────────┘    │   --rpc-url http://10.88.0.10   │
+                                         └──────────────────────────────────┘
+
+#### Configuration
+
+```yaml
+docker:
+  image: ghcr.io/tempoxyz/tempo:latest
+  # Private network for validator P2P
+  validator_network:
+    name: tempo-validator-net
+    subnet: 10.88.0.0/24
+  # Public-facing network for RPC/WS + external nodes
+  public_network:
+    name: tempo-public-net
+    subnet: 10.89.0.0/24
+  # Optional read-only follow nodes (sync from validators via WS)
+  follow_nodes:
+    - moniker: follower0
+      port: 9000
+  # Optional P2P proxy services
+  p2p_proxies:
+    - moniker: proxy0
+      port: 7000
+```
+
+Key differences from single-network mode:
+
+- **Validators are on the validator network only** — they are not reachable
+  from the public network.  All services (P2P, RPC, WS, metrics) bind to the
+  private validator-network IP only.
+- **Follow nodes are dual-homed**: validator network for WS sync from
+  validators (``--follow ws://10.88.0.x:8005``), public network for exposing
+  RPC/WS to external users.
+- **P2P proxies are dual-homed**: validator network for RPC access to
+  validators (``--rpc-url http://10.88.0.x:8004``), public network for serving
+  P2P to external peers.
+- **Genesis peer addresses** use the private validator-network IPs, so consensus
+  traffic never leaves the validator network.
+
+#### Published Ports
+
+Port scheme is the same as single-network mode.  Follow nodes use their own
+``port`` as base:
+
+| Service   | HTTP RPC       | WebSocket      |
+|-----------|----------------|----------------|
+| node0     | ``8004:8004``  | ``8005:8005``  |
+| follower0 | ``9004:8004``  | ``9005:8005``  |
+
 ### External Full Nodes
 
 Full nodes can sync from any validator's published WebSocket port:
 
 ```bash
+# Host-published WS port (single-network or two-network mode)
 tempo node --follow ws://127.0.0.1:8005
 ```
 
@@ -187,7 +259,7 @@ Options:
 | ``--data``            | ``./data``       | Root data directory                      |
 | ``--config``          | ``./devnet.yaml``| YAML configuration file                  |
 | ``--force``           | false            | Overwrite existing data directory        |
-| ``--gen-compose-file``| false            | Also generate ``docker-compose.yml``     |
+| ``--gen-compose-file``| false            | Also generate ``docker-compose.yaml``     |
 
 ## Config Patches
 
