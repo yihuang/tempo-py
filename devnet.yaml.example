@@ -115,8 +115,7 @@ validators:
 #     └── Genesis bakes these private IPs as consensus peer addresses
 #
 #   Public Network — 10.89.0.0/24
-#     ├── Validators bind HTTP/WS RPC to this network's IP (published to host)
-#     ├── Follow nodes (read-only) sync via WS from validators
+#     ├── Follow nodes expose HTTP/WS RPC to external users
 #     └── P2P proxies serve block data on this network
 #
 # Network topology diagram (two-network mode)::
