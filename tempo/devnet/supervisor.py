@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import configparser
 import json
+import secrets
+import subprocess
+import sys
 from pathlib import Path
 
 import jsonmerge
@@ -501,6 +504,78 @@ def _docker_node_two_network_command(
     )
 
 
+def _build_follow_node_args(
+    tempo_bin: str,
+    upstream_ws: str,
+    *,
+    include_signing_key: bool = False,
+) -> list[str]:
+    """Build the ``tempo node --follow`` argument list for a read-only node.
+
+    Shared by follow nodes (dual-homed) and public nodes (public-only).
+    The caller provides the upstream WS URL; the node follows from there
+    and exposes RPC/WS on ``0.0.0.0``.
+
+    Args:
+        upstream_ws: WebSocket URL of the upstream node to follow.
+        include_signing_key: Whether to include ``--consensus.signing-key``.
+    """
+    args: list[str] = [
+        tempo_bin,
+        "node",
+        "--follow",
+        upstream_ws,
+        "--chain",
+        "./genesis.json",
+        "--datadir",
+        ".",
+    ]
+
+    if include_signing_key:
+        args.extend(["--consensus.signing-key", "./signing.key"])
+
+    args.extend(
+        [
+            "--http",
+            "--http.addr",
+            "0.0.0.0",
+            "--http.port",
+            str(http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
+            "--http.api",
+            "all",
+            "--ws",
+            "--ws.addr",
+            "0.0.0.0",
+            "--ws.port",
+            str(ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
+            "--consensus.use-local-defaults",
+        ]
+    )
+
+    return args
+
+
+def _prepare_periphery_dir(
+    data_dir: Path,
+    moniker: str,
+    command: list[str],
+) -> Path:
+    """Common setup for a periphery service directory.
+
+    Creates the directory, copies ``genesis.json`` from the root, and
+    writes a ``docker-run.sh`` wrapper.  Returns the directory path.
+    """
+    svc_dir = data_dir / moniker
+    svc_dir.mkdir(parents=True, exist_ok=True)
+
+    genesis_src = data_dir / "genesis.json"
+    if genesis_src.exists():
+        (svc_dir / "genesis.json").write_bytes(genesis_src.read_bytes())
+
+    write_docker_run_script(svc_dir, command)
+    return svc_dir
+
+
 def _docker_follow_node_command(
     config: DevnetConfig,
     follow: FollowNodeConfig,
@@ -520,31 +595,7 @@ def _docker_follow_node_command(
     val_ws_ip = config.docker_ip(0)
     upstream_ws = f"ws://{val_ws_ip}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
-    args: list[str] = [
-        config.tempo_bin,
-        "node",
-        "--follow",
-        upstream_ws,
-        "--chain",
-        "./genesis.json",
-        "--datadir",
-        ".",
-        "--consensus.signing-key",
-        "./signing.key",
-        "--http",
-        "--http.addr",
-        "0.0.0.0",
-        "--http.port",
-        str(http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
-        "--http.api",
-        "all",
-        "--ws",
-        "--ws.addr",
-        "0.0.0.0",
-        "--ws.port",
-        str(ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
-        "--consensus.use-local-defaults",
-    ]
+    args = _build_follow_node_args(config.tempo_bin, upstream_ws, include_signing_key=True)
 
     if config.patch_node_flags:
         args.extend(config.patch_node_flags)
@@ -596,43 +647,16 @@ def _docker_public_node_command(
     """Build the ``tempo node --follow`` argument list for a public-only node.
 
     Lives on the public network only (no validator network access).
-    Syncs blocks by following one of the followers via WS on the
-    public network.  Exposes its own RPC/WS endpoint externally.
+    Syncs blocks by following the follower via WS (both on public network).
+    The follower itself syncs from a validator on the validator network.
 
-    Data flow: validators → follower (WS follow) → public node (WS follow)
+    Data flow: validators → follower (WS) → public node (WS follow)
     """
-    # Pick the first follower as the WS upstream on the public network.
     follow_nodes = config.docker_follow_nodes
-    if follow_nodes:
-        upstream_moniker = follow_nodes[0].moniker
-    else:
-        upstream_moniker = "follower0"
-
+    upstream_moniker = follow_nodes[0].moniker if follow_nodes else "follower0"
     upstream_ws = f"ws://{upstream_moniker}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
-    args: list[str] = [
-        config.tempo_bin,
-        "node",
-        "--follow",
-        upstream_ws,
-        "--chain",
-        "./genesis.json",
-        "--datadir",
-        ".",
-        "--http",
-        "--http.addr",
-        "0.0.0.0",
-        "--http.port",
-        str(http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
-        "--http.api",
-        "all",
-        "--ws",
-        "--ws.addr",
-        "0.0.0.0",
-        "--ws.port",
-        str(ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
-        "--consensus.use-local-defaults",
-    ]
+    args = _build_follow_node_args(config.tempo_bin, upstream_ws)
 
     if config.patch_node_flags:
         args.extend(config.patch_node_flags)
@@ -758,6 +782,37 @@ def _generate_single_network_compose(config: DevnetConfig, data_dir: Path) -> di
     return services
 
 
+def _ensure_enode_keypair(svc_dir: Path) -> None:
+    """Generate ``enode.key`` and ``enode.identity`` if not already present.
+
+    The key is a random secp256k1 keypair.  ``enode.key`` contains the
+    32-byte private key (hex).  ``enode.identity`` contains the 64-byte
+    uncompressed public key (hex, without 0x04 prefix), derived by
+    ``tempo p2p enode``.
+    """
+    if not (svc_dir / "enode.key").exists():
+        # 32 random bytes as hex-encoded secp256k1 private key
+        priv = secrets.token_bytes(32)
+        (svc_dir / "enode.key").write_text(priv.hex())
+
+    if not (svc_dir / "enode.identity").exists():
+        try:
+            result = subprocess.run(
+                ["tempo", "-q", "p2p", "enode", str(svc_dir / "enode.key")],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            # Parse "enode://<64-byte-hex>@..." format
+            if result.returncode == 0:
+                line = result.stdout.strip()
+                if line.startswith("enode://"):
+                    pubkey = line[len("enode://") : line.index("@")]
+                    (svc_dir / "enode.identity").write_text(pubkey)
+        except Exception as exc:
+            print(f"  warning: failed to derive enode identity: {exc}", file=sys.stderr)
+
+
 def _prepare_follow_node_dir(
     config: DevnetConfig,
     data_dir: Path,
@@ -765,20 +820,16 @@ def _prepare_follow_node_dir(
     follow: FollowNodeConfig,
 ) -> None:
     """Set up a follow node directory with genesis and key files."""
+    _prepare_periphery_dir(
+        data_dir,
+        moniker,
+        _docker_follow_node_command(config, follow, data_dir),
+    )
+
     f_dir = data_dir / moniker
-    f_dir.mkdir(parents=True, exist_ok=True)
-
-    genesis_src = data_dir / "genesis.json"
-    if genesis_src.exists():
-        (f_dir / "genesis.json").write_bytes(genesis_src.read_bytes())
-
+    _ensure_enode_keypair(f_dir)
     if not (f_dir / "signing.key").exists():
-        # 32-byte ed25519 private key as hex (valid format, not used for consensus)
         (f_dir / "signing.key").write_text("0000000000000000000000000000000000000000000000000000000000000001")
-    if not (f_dir / "enode.key").exists():
-        (f_dir / "enode.key").write_text("0000000000000000000000000000000000000000000000000000000000000003")
-
-    write_docker_run_script(f_dir, _docker_follow_node_command(config, follow, data_dir))
 
 
 def _prepare_proxy_dir(
@@ -788,18 +839,14 @@ def _prepare_proxy_dir(
     proxy: P2PProxyConfig,
 ) -> None:
     """Set up a P2P proxy directory with enode key and run script."""
+    _prepare_periphery_dir(
+        data_dir,
+        moniker,
+        _docker_p2p_proxy_command(config, proxy, data_dir),
+    )
+
     p_dir = data_dir / moniker
-    p_dir.mkdir(parents=True, exist_ok=True)
-
-    genesis_src = data_dir / "genesis.json"
-    if genesis_src.exists():
-        (p_dir / "genesis.json").write_bytes(genesis_src.read_bytes())
-
-    if not (p_dir / "enode.key").exists():
-        # 32-byte ed25519 private key as hex (valid format)
-        (p_dir / "enode.key").write_text("0000000000000000000000000000000000000000000000000000000000000002")
-
-    write_docker_run_script(p_dir, _docker_p2p_proxy_command(config, proxy, data_dir))
+    _ensure_enode_keypair(p_dir)
 
 
 def _prepare_public_node_dir(
@@ -808,18 +855,12 @@ def _prepare_public_node_dir(
     moniker: str,
     public_node: PublicNodeConfig,
 ) -> None:
-    """Set up a public node directory with genesis and key files."""
-    n_dir = data_dir / moniker
-    n_dir.mkdir(parents=True, exist_ok=True)
-
-    genesis_src = data_dir / "genesis.json"
-    if genesis_src.exists():
-        (n_dir / "genesis.json").write_bytes(genesis_src.read_bytes())
-
-    if not (n_dir / ".secret").exists():
-        write_secret_file(n_dir)
-
-    write_docker_run_script(n_dir, _docker_public_node_command(config, public_node, data_dir))
+    """Set up a public node directory with genesis and run script."""
+    _prepare_periphery_dir(
+        data_dir,
+        moniker,
+        _docker_public_node_command(config, public_node, data_dir),
+    )
 
 
 def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[str, dict]:
