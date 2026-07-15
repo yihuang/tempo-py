@@ -507,35 +507,28 @@ def _docker_node_two_network_command(
 def _build_follow_node_args(
     tempo_bin: str,
     upstream_ws: str,
-    *,
-    include_signing_key: bool = False,
 ) -> list[str]:
     """Build the ``tempo node --follow`` argument list for a read-only node.
 
     Shared by follow nodes (dual-homed) and public nodes (public-only).
-    The caller provides the upstream WS URL; the node follows from there
-    and exposes RPC/WS on ``0.0.0.0``.
+    ``upstream_ws`` is always required for local devnets (no default RPC URL).
 
-    Args:
-        upstream_ws: WebSocket URL of the upstream node to follow.
-        include_signing_key: Whether to include ``--consensus.signing-key``.
+    Follows the official RPC node pattern from the Tempo docs:
+    ``tempo node --follow <ws_url> --http --http.api eth,net,web3,txpool,trace``
     """
     args: list[str] = [
         tempo_bin,
         "node",
         "--follow",
         upstream_ws,
-        "--chain",
-        "./genesis.json",
-        "--datadir",
-        ".",
     ]
-
-    if include_signing_key:
-        args.extend(["--consensus.signing-key", "./signing.key"])
 
     args.extend(
         [
+            "--chain",
+            "./genesis.json",
+            "--datadir",
+            ".",
             "--http",
             "--http.addr",
             "0.0.0.0",
@@ -548,7 +541,6 @@ def _build_follow_node_args(
             "0.0.0.0",
             "--ws.port",
             str(ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
-            "--consensus.use-local-defaults",
         ]
     )
 
@@ -595,7 +587,7 @@ def _docker_follow_node_command(
     val_ws_ip = config.docker_ip(0)
     upstream_ws = f"ws://{val_ws_ip}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
-    args = _build_follow_node_args(config.tempo_bin, upstream_ws, include_signing_key=True)
+    args = _build_follow_node_args(config.tempo_bin, upstream_ws)
 
     if config.patch_node_flags:
         args.extend(config.patch_node_flags)
@@ -828,8 +820,6 @@ def _prepare_follow_node_dir(
 
     f_dir = data_dir / moniker
     _ensure_enode_keypair(f_dir)
-    if not (f_dir / "signing.key").exists():
-        (f_dir / "signing.key").write_text("0000000000000000000000000000000000000000000000000000000000000001")
 
 
 def _prepare_proxy_dir(
