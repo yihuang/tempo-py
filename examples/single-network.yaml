@@ -25,8 +25,13 @@ validators:
   - host: 127.0.0.1
     port: 8010
     moniker: node1
+  - host: 127.0.0.1
+    port: 8020
+    moniker: node2
+  - host: 127.0.0.1
+    port: 8030
+    moniker: node3
 
-no_dkg_in_genesis: true
 no_extra_tokens: true
 no_pairwise_liquidity: true
 

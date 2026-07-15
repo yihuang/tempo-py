@@ -5,13 +5,13 @@
 #
 # Network Layout:
 #
-#   Validator Network (10.88.0.0/24)     Public Network (10.89.0.0/24)
+#   Validator Network (10.88.0.0/24)      Public Network (10.89.0.0/24)
 #   ┌──────────────────────────────┐    ┌──────────────────────────────────┐
-#   │ node0 (10.88.0.10)           │    │ follower0 (10.89.0.13)           │
+#   │ node0 (10.88.0.10)           │    │ follower0 (10.89.0.14)           │
 #   │   P2P + RPC + WS (internal) │WS──┤   RPC/WS for external users     │
 #   │ node1 (10.88.0.11)           │    │   --follow ws://10.88.0.10      │
 #   │ node2 (10.88.0.12)           │    │                                  │
-#   │ validator network only             │    │ proxy0 (10.89.0.14)             │
+#   │ validator network only             │    │ proxy0 (10.89.0.15)             │
 #   │ no public network access            │RPC─┤   p2p-proxy for external peers  │
 #   └──────────────────────────────┘    └──────────────────────────────────┘
 #
@@ -19,6 +19,7 @@
 #   node0     HTTP :8004  WS :8005
 #   node1     HTTP :8014  WS :8015
 #   node2     HTTP :8024  WS :8025
+#   node3     HTTP :8034  WS :8035
 #   follower0 HTTP :9004  WS :9005
 #   proxy0    P2P  :7001
 #
@@ -47,8 +48,9 @@ validators:
   - host: 127.0.0.1
     port: 8020
     moniker: node2
-
-no_dkg_in_genesis: true
+  - host: 127.0.0.1
+    port: 8030
+    moniker: node3
 
 docker:
   image: ghcr.io/tempoxyz/tempo:latest
