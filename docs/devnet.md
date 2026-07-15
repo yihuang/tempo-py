@@ -41,7 +41,7 @@ tempo-devnet start --data ./data
 
 > **See also:** Ready-to-use examples in the ``examples/`` directory for
 > different deployment patterns (single-network, two-network, native mode,
-> custom patches, etc.).```
+> custom patches, etc.).
 
 ## Deployment Modes
 
