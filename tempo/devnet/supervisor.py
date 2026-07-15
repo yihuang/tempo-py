@@ -713,9 +713,10 @@ def _prepare_follow_node_dir(
         (f_dir / "genesis.json").write_bytes(genesis_src.read_bytes())
 
     if not (f_dir / "signing.key").exists():
-        (f_dir / "signing.key").write_text("dummy-follow-signing-key")
+        # 32-byte ed25519 private key as hex (valid format, not used for consensus)
+        (f_dir / "signing.key").write_text("0000000000000000000000000000000000000000000000000000000000000001")
     if not (f_dir / "enode.key").exists():
-        (f_dir / "enode.key").write_text("dummy-follow-enode-key")
+        (f_dir / "enode.key").write_text("0000000000000000000000000000000000000000000000000000000000000003")
 
     write_docker_run_script(f_dir, _docker_follow_node_command(config, follow, data_dir))
 
@@ -731,7 +732,8 @@ def _prepare_proxy_dir(
     p_dir.mkdir(parents=True, exist_ok=True)
 
     if not (p_dir / "enode.key").exists():
-        (p_dir / "enode.key").write_text("dummy-proxy-enode-key")
+        # 32-byte ed25519 private key as hex (valid format)
+        (p_dir / "enode.key").write_text("0000000000000000000000000000000000000000000000000000000000000002")
 
     write_docker_run_script(p_dir, _docker_p2p_proxy_command(config, proxy, data_dir))
 
