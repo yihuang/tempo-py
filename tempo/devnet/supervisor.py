@@ -507,11 +507,18 @@ def _docker_node_two_network_command(
 def _build_follow_node_args(
     tempo_bin: str,
     upstream_ws: str,
+    *,
+    trusted_peers: list[str] | None = None,
+    p2p_secret_key: str | None = None,
 ) -> list[str]:
     """Build the ``tempo node --follow`` argument list for a read-only node.
 
     Shared by follow nodes (dual-homed) and public nodes (public-only).
     ``upstream_ws`` is always required for local devnets (no default RPC URL).
+
+    When ``trusted_peers`` is provided, also adds execution-layer P2P arguments
+    (``--port``, ``--discovery.port``, ``--p2p-secret-key``, ``--trusted-peers``)
+    so the node can connect to P2P proxies or other peers alongside WS follow.
 
     Follows the official RPC node pattern from the Tempo docs:
     ``tempo node --follow <ws_url> --http --http.api eth,net,web3,txpool,trace``
@@ -543,6 +550,21 @@ def _build_follow_node_args(
             str(ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
         ]
     )
+
+    if trusted_peers and p2p_secret_key:
+        peers_str = ",".join(trusted_peers)
+        args.extend(
+            [
+                "--port",
+                str(execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)),
+                "--discovery.port",
+                str(execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)),
+                "--p2p-secret-key",
+                p2p_secret_key,
+                "--trusted-peers",
+                peers_str,
+            ]
+        )
 
     return args
 
@@ -642,13 +664,36 @@ def _docker_public_node_command(
     Syncs blocks by following the follower via WS (both on public network).
     The follower itself syncs from a validator on the validator network.
 
-    Data flow: validators → follower (WS) → public node (WS follow)
+    When P2P proxies are configured, adds ``--trusted-peers`` pointing to
+    each proxy's enode so the public node can also connect via P2P for
+    testing the proxy.
+
+    Data flow: validators → follower (WS) → public node (WS follow + P2P to proxy)
     """
     follow_nodes = config.docker_follow_nodes
     upstream_moniker = follow_nodes[0].moniker if follow_nodes else "follower0"
     upstream_ws = f"ws://{upstream_moniker}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
-    args = _build_follow_node_args(config.tempo_bin, upstream_ws)
+    # Build trusted-peers list from P2P proxy enode identities.
+    # Proxies are dual-homed on the public network, so the Docker service
+    # name resolves via internal DNS.
+    trusted_peers: list[str] = []
+    for proxy in config.docker_p2p_proxies:
+        enode_id_file = data_dir / proxy.moniker / "enode.identity"
+        if not enode_id_file.exists():
+            continue
+        proxy_host = proxy.moniker
+        proxy_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
+        trusted_peers.append(
+            f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}"
+        )
+
+    args = _build_follow_node_args(
+        config.tempo_bin,
+        upstream_ws,
+        trusted_peers=trusted_peers or None,
+        p2p_secret_key="./enode.key" if trusted_peers else None,
+    )
 
     if config.patch_node_flags:
         args.extend(config.patch_node_flags)
@@ -862,12 +907,19 @@ def _prepare_public_node_dir(
     moniker: str,
     public_node: PublicNodeConfig,
 ) -> None:
-    """Set up a public node directory with genesis and run script."""
+    """Set up a public node directory with genesis, run script, and enode keypair.
+
+    An enode keypair is generated so the public node has a P2P identity
+    for connecting to P2P proxies via ``--trusted-peers``.
+    """
     _prepare_periphery_dir(
         data_dir,
         moniker,
         _docker_public_node_command(config, public_node, data_dir),
     )
+
+    n_dir = data_dir / moniker
+    _ensure_enode_keypair(n_dir)
 
 
 def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[str, dict]:
