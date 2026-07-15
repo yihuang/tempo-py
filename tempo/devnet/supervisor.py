@@ -731,6 +731,10 @@ def _prepare_proxy_dir(
     p_dir = data_dir / moniker
     p_dir.mkdir(parents=True, exist_ok=True)
 
+    genesis_src = data_dir / "genesis.json"
+    if genesis_src.exists():
+        (p_dir / "genesis.json").write_bytes(genesis_src.read_bytes())
+
     if not (p_dir / "enode.key").exists():
         # 32-byte ed25519 private key as hex (valid format)
         (p_dir / "enode.key").write_text("0000000000000000000000000000000000000000000000000000000000000002")
