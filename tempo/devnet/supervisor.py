@@ -200,7 +200,7 @@ def _write_run_script_content(
     """
     tag_suffix = f" ({tag})" if tag else ""
     binary = _sh_quote(node_args[0])
-    arg_lines = " \\".join("  " + _sh_quote(a) for a in node_args[1:])
+    arg_lines = " \\\n".join("  " + _sh_quote(a) for a in node_args[1:])
 
     lines = [
         "#!/bin/sh",
