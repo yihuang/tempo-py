@@ -226,8 +226,7 @@ Port scheme is the same as single-network mode.  Follow nodes use their own
 Full nodes can sync from any validator's published WebSocket port:
 
 ```bash
-# Single-network mode
-# -or- public network IP in two-network mode
+# Host-published WS port (single-network or two-network mode)
 tempo node --follow ws://127.0.0.1:8005
 ```
 
