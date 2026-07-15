@@ -21,7 +21,7 @@
 #   node2     HTTP :8024  WS :8025
 #   node3     HTTP :8034  WS :8035
 #   follower0 HTTP :9004  WS :9005
-#   proxy0    P2P  :7001
+#   proxy0    P2P  :7000
 #
 # Usage:
 #   tempo-devnet init --data ./data --config examples/two-network.yaml --gen-compose-file
