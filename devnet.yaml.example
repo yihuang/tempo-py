@@ -147,6 +147,13 @@ validators:
 #   p2p_proxies:
 #     - moniker: proxy0
 #       port: 7000                         # P2P proxy listen port
+#
+#   # Optional public nodes (public network only, sync from follower + P2P proxy)
+#   # When P2P proxies are configured, public nodes automatically add
+#   # ``--trusted-peers`` pointing to each proxy's enode for P2P testing.
+#   public_nodes:
+#     - moniker: public0
+#       port: 6000
 
 # ---------------------------------------------------------------------------
 # Config patches — applied after ``tempo-xtask generate-localnet`` finishes

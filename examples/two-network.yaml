@@ -20,7 +20,9 @@
 #   Validators produce blocks on the private network.
 #   Proxy fetches blocks via RPC from node0, serves them over P2P.
 #   Follow node syncs from node0 via WS, exposes RPC/WS publicly.
-#   Public node peers with proxy via P2P, syncs blocks and exposes RPC/WS.
+#   Public node peers with proxy via P2P (``--trusted-peers``), syncs
+#   blocks and exposes RPC/WS.  The proxy's enode identity is automatically
+#   resolved from its ``enode.identity`` file and injected as a trusted peer.
 #
 # Published ports on host:
 #   node0     HTTP :8004  WS :8005
