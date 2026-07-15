@@ -590,6 +590,28 @@ def _prepare_periphery_dir(
     return svc_dir
 
 
+def _docker_proxy_trusted_peers(
+    config: DevnetConfig,
+    data_dir: Path,
+) -> list[str]:
+    """Build ``--trusted-peers`` entries for all P2P proxies.
+
+    Each entry uses the proxy's Docker service name (resolvable via internal
+    DNS) and its execution-layer P2P port.
+    """
+    peers: list[str] = []
+    for proxy in config.docker_p2p_proxies:
+        enode_id_file = data_dir / proxy.moniker / "enode.identity"
+        if not enode_id_file.exists():
+            continue
+        proxy_host = proxy.moniker
+        proxy_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
+        peers.append(
+            f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}"
+        )
+    return peers
+
+
 def _docker_follow_node_command(
     config: DevnetConfig,
     follow: FollowNodeConfig,
@@ -603,13 +625,24 @@ def _docker_follow_node_command(
     - Validator network: sync from validators via WS (``10.88.0.x:8005``)
     - Public network: expose HTTP/WS RPC externally
 
+    When P2P proxies are configured, adds ``--trusted-peers`` pointing to
+    each proxy's enode so transactions submitted to the follower's RPC can
+    propagate to the proxy (and vice versa).
+
     They do not have a BLS signing share and do not participate in consensus.
     """
     # Follow from validator0 on the validator network (private IP).
     val_ws_ip = config.docker_ip(0)
     upstream_ws = f"ws://{val_ws_ip}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
-    args = _build_follow_node_args(config.tempo_bin, upstream_ws)
+    trusted_peers = _docker_proxy_trusted_peers(config, data_dir)
+
+    args = _build_follow_node_args(
+        config.tempo_bin,
+        upstream_ws,
+        trusted_peers=trusted_peers or None,
+        p2p_secret_key="./enode.key" if trusted_peers else None,
+    )
 
     if config.patch_node_flags:
         args.extend(config.patch_node_flags)
@@ -674,17 +707,7 @@ def _docker_public_node_command(
     upstream_moniker = follow_nodes[0].moniker if follow_nodes else "follower0"
     upstream_ws = f"ws://{upstream_moniker}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
-    # Build trusted-peers list from P2P proxy enode identities.
-    # Proxies are dual-homed on the public network, so the Docker service
-    # name resolves via internal DNS.
-    trusted_peers: list[str] = []
-    for proxy in config.docker_p2p_proxies:
-        enode_id_file = data_dir / proxy.moniker / "enode.identity"
-        if not enode_id_file.exists():
-            continue
-        proxy_host = proxy.moniker
-        proxy_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
-        trusted_peers.append(f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}")
+    trusted_peers = _docker_proxy_trusted_peers(config, data_dir)
 
     args = _build_follow_node_args(
         config.tempo_bin,
