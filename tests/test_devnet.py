@@ -17,8 +17,6 @@ from tempo.devnet.cluster import ClusterCLI
 
 from tempo.devnet.config import (
     DevnetConfig,
-    FollowNodeConfig,
-    P2PProxyConfig,
     ValidatorConfig,
 )
 from tempo.devnet.ports import (
