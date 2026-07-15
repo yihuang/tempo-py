@@ -8,8 +8,8 @@ deployment patterns. Each file is self-documenting and ready to use.
 | File | Mode | Validators | Docker | Periphery | Best For |
 |------|------|------------|--------|-----------|----------|
 | `native.yaml` | native (supervisord) | 3 | — | — | Local dev, process debugging, profiling |
-| `single-network.yaml` | single bridge | 2 | 1 network | — | CI, smoke tests, fastest startup |
-| `two-network.yaml` | two networks | 3 | 2 networks | follower + proxy | Production topology simulation |
+| `single-network.yaml` | single bridge | 4 | 1 network | — | CI, smoke tests, fastest startup |
+| `two-network.yaml` | two networks | 4 | 2 networks | follower + proxy + public node | Production topology simulation |
 
 ## Architecture
 
@@ -76,7 +76,7 @@ Validators are **isolated** on a private network. External services
 (follow nodes, P2P proxies) bridge to a public-facing network.
 
 **Choose when:** you want to test production deployment topology, network
-isolation, or the follower/proxy gateway pattern.
+isolation, or the follower/proxy/gateway pattern.
 
 ## Usage
 

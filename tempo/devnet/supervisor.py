@@ -14,6 +14,7 @@ from .config import (
     DevnetConfig,
     FollowNodeConfig,
     P2PProxyConfig,
+    PublicNodeConfig,
     ValidatorConfig,
     DOCKER_CONSENSUS_P2P_PORT,
 )
@@ -585,6 +586,60 @@ def _docker_p2p_proxy_command(
     return args
 
 
+def _docker_public_node_command(
+    config: DevnetConfig,
+    public_node: PublicNodeConfig,
+    data_dir: Path,
+    *,
+    index: int = 0,
+) -> list[str]:
+    """Build the ``tempo node --follow`` argument list for a public-only node.
+
+    Lives on the public network only (no validator network access).
+    Syncs blocks by following one of the followers via WS on the
+    public network.  Exposes its own RPC/WS endpoint externally.
+
+    Data flow: validators → follower (WS follow) → public node (WS follow)
+    """
+    # Pick the first follower as the WS upstream on the public network.
+    follow_nodes = config.docker_follow_nodes
+    if follow_nodes:
+        upstream_moniker = follow_nodes[0].moniker
+    else:
+        upstream_moniker = "follower0"
+
+    upstream_ws = f"ws://{upstream_moniker}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
+
+    args: list[str] = [
+        config.tempo_bin,
+        "node",
+        "--follow",
+        upstream_ws,
+        "--chain",
+        "./genesis.json",
+        "--datadir",
+        ".",
+        "--http",
+        "--http.addr",
+        "0.0.0.0",
+        "--http.port",
+        str(http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
+        "--http.api",
+        "all",
+        "--ws",
+        "--ws.addr",
+        "0.0.0.0",
+        "--ws.port",
+        str(ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
+        "--consensus.use-local-defaults",
+    ]
+
+    if config.patch_node_flags:
+        args.extend(config.patch_node_flags)
+
+    return args
+
+
 def write_docker_run_script(val_dir: Path, node_args: list[str]) -> Path:
     """Write a ``docker-run.sh`` wrapper script using container-relative paths.
 
@@ -661,7 +716,12 @@ def generate_docker_compose(
     with open(dst, "w") as f:
         yaml.dump(compose, f, default_flow_style=False, sort_keys=False)
 
-    total = len(config.validators) + len(config.docker_follow_nodes) + len(config.docker_p2p_proxies)
+    total = (
+        len(config.validators)
+        + len(config.docker_follow_nodes)
+        + len(config.docker_p2p_proxies)
+        + len(config.docker_public_nodes)
+    )
     print(f"  wrote docker-compose.yaml ({total} services, {config.docker_topology} network mode)")
     return dst
 
@@ -740,6 +800,26 @@ def _prepare_proxy_dir(
         (p_dir / "enode.key").write_text("0000000000000000000000000000000000000000000000000000000000000002")
 
     write_docker_run_script(p_dir, _docker_p2p_proxy_command(config, proxy, data_dir))
+
+
+def _prepare_public_node_dir(
+    config: DevnetConfig,
+    data_dir: Path,
+    moniker: str,
+    public_node: PublicNodeConfig,
+) -> None:
+    """Set up a public node directory with genesis and key files."""
+    n_dir = data_dir / moniker
+    n_dir.mkdir(parents=True, exist_ok=True)
+
+    genesis_src = data_dir / "genesis.json"
+    if genesis_src.exists():
+        (n_dir / "genesis.json").write_bytes(genesis_src.read_bytes())
+
+    if not (n_dir / ".secret").exists():
+        write_secret_file(n_dir)
+
+    write_docker_run_script(n_dir, _docker_public_node_command(config, public_node, data_dir))
 
 
 def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[str, dict]:
@@ -851,6 +931,32 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
                 },
                 config.docker_public_network_name: {
                     "ipv4_address": p_pub_ip,
+                },
+            },
+        }
+
+    # --- Public nodes: public network only, sync from proxy via P2P ---
+    n_start = len(config.validators) + len(config.docker_follow_nodes) + len(config.docker_p2p_proxies)
+    for n_idx, public_node in enumerate(config.docker_public_nodes):
+        n_moniker: str = public_node.moniker
+        n_port: int = public_node.port
+
+        _prepare_public_node_dir(config, data_dir, n_moniker, public_node)
+
+        n_pub_ip = config.docker_public_ip(n_start + n_idx)
+
+        services[n_moniker] = {
+            "image": config.docker_image,
+            "entrypoint": ["/bin/sh"],
+            "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
+            "volumes": [f"{data_dir / n_moniker}:{CONTAINER_DATA_DIR}"],
+            "ports": [
+                f"{http_rpc_port(n_port)}:{http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
+                f"{ws_rpc_port(n_port)}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
+            ],
+            "networks": {
+                config.docker_public_network_name: {
+                    "ipv4_address": n_pub_ip,
                 },
             },
         }

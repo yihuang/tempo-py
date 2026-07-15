@@ -147,6 +147,25 @@ class P2PProxyConfig:
         return cls(moniker=d["moniker"], port=d.get("port", 7000))
 
 
+class PublicNodeConfig:
+    """Configuration for a read-only public node that syncs via P2P on the public network.
+
+    Lives on the public network only (unlike follow nodes which are dual-homed).
+    Syncs blocks from the follower's WS endpoint.
+    """
+
+    def __init__(self, moniker: str, port: int = 6000) -> None:
+        self.moniker = moniker
+        self.port = port
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"moniker": self.moniker, "port": self.port}
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> PublicNodeConfig:
+        return cls(moniker=d["moniker"], port=d.get("port", 6000))
+
+
 class DevnetConfig:
     """Complete devnet configuration loaded from a YAML file."""
 
@@ -217,6 +236,7 @@ class DevnetConfig:
         self.docker_public_network: dict[str, str] = {}
         self.docker_follow_nodes: list[FollowNodeConfig] = []
         self.docker_p2p_proxies: list[P2PProxyConfig] = []
+        self.docker_public_nodes: list[PublicNodeConfig] = []
 
         if "validator_network" not in docker_raw and "public_network" not in docker_raw:
             return
@@ -236,6 +256,7 @@ class DevnetConfig:
         self.docker_subnet = self.docker_validator_network.get("subnet", DEFAULT_DOCKER_SUBNET)
         self.docker_follow_nodes = [FollowNodeConfig.from_dict(f) for f in (docker_raw.get("follow_nodes") or [])]
         self.docker_p2p_proxies = [P2PProxyConfig.from_dict(p) for p in (docker_raw.get("p2p_proxies") or [])]
+        self.docker_public_nodes = [PublicNodeConfig.from_dict(n) for n in (docker_raw.get("public_nodes") or [])]
 
     @property
     def validators_arg(self) -> str:
@@ -371,6 +392,8 @@ class DevnetConfig:
                 docker_dict["follow_nodes"] = [f.to_dict() for f in self.docker_follow_nodes]
             if self.docker_p2p_proxies:
                 docker_dict["p2p_proxies"] = [p.to_dict() for p in self.docker_p2p_proxies]
+            if self.docker_public_nodes:
+                docker_dict["public_nodes"] = [n.to_dict() for n in self.docker_public_nodes]
             d["docker"] = docker_dict
         else:
             d["docker"] = {
