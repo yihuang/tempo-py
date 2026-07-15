@@ -630,8 +630,7 @@ def generate_docker_compose(
     if dst.exists() and not force:
         return dst
 
-    services: dict[str, dict] = {}
-
+    services: dict[str, dict]
     if config.docker_is_two_network:
         services = _generate_two_network_compose(config, data_dir)
     else:
