@@ -742,6 +742,21 @@ def generate_docker_compose(
     return dst
 
 
+def _healthcheck_config(host: str, port: int) -> dict:
+    """Docker Compose health check using bash's built-in TCP check.
+
+    Uses ``/dev/tcp`` via ``/bin/bash`` (the container has bash but
+    Docker's default ``CMD-SHELL`` uses ``/bin/sh`` which doesn't
+    support ``/dev/tcp``).
+    """
+    return {
+        "test": ["CMD-SHELL", f"/bin/bash -c 'exec 3<>/dev/tcp/{host}/{port}'"],
+        "interval": "3s",
+        "retries": 20,
+        "start_period": "5s",
+    }
+
+
 def _generate_single_network_compose(config: DevnetConfig, data_dir: Path) -> dict[str, dict]:
     """Generate docker-compose services for single-network (legacy) mode.
 
@@ -768,6 +783,8 @@ def _generate_single_network_compose(config: DevnetConfig, data_dir: Path) -> di
             "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
             "volumes": [f"{data_dir / val.dir_name}:{CONTAINER_DATA_DIR}"],
             "ports": published_ports,
+            "healthcheck": _healthcheck_config("localhost", container_http),
+            "restart": "unless-stopped",
             "networks": {config.docker_network: {"ipv4_address": config.docker_ip(index)}},
         }
 
@@ -898,6 +915,8 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
             "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
             "volumes": [f"{data_dir / val.dir_name}:{CONTAINER_DATA_DIR}"],
             "ports": published_ports,
+            "healthcheck": _healthcheck_config(config.docker_ip(index), container_http),
+            "restart": "unless-stopped",
             # Only on validator network — NOT on public network
             "networks": {
                 config.docker_validator_network_name: {
@@ -913,8 +932,7 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
 
         _prepare_follow_node_dir(config, data_dir, f_moniker, follow)
 
-        # Follow node on validator network for WS sync (last validator IP + 1 + f_idx)
-        # and on public network for RPC exposure.
+        # Follow node on validator network for WS sync
         f_val_ip = config.docker_ip(f_start + f_idx)
         f_pub_ip = config.docker_public_ip(f_start + f_idx)
 
@@ -923,6 +941,9 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
             "entrypoint": ["/bin/sh"],
             "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
             "volumes": [f"{data_dir / f_moniker}:{CONTAINER_DATA_DIR}"],
+            "healthcheck": _healthcheck_config("localhost", http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
+            "restart": "on-failure",
+            "depends_on": {"node0": {"condition": "service_healthy"}},
             "ports": [
                 f"{http_rpc_port(f_port)}:{http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
                 f"{ws_rpc_port(f_port)}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
@@ -953,6 +974,8 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
             "entrypoint": ["/bin/sh"],
             "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
             "volumes": [f"{data_dir / p_moniker}:{CONTAINER_DATA_DIR}"],
+            "healthcheck": _healthcheck_config("localhost", execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)),
+            "restart": "on-failure",
             "ports": [
                 f"{p_port}:{execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)}",
             ],
@@ -981,6 +1004,9 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
             "entrypoint": ["/bin/sh"],
             "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
             "volumes": [f"{data_dir / n_moniker}:{CONTAINER_DATA_DIR}"],
+            "healthcheck": _healthcheck_config("localhost", http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)),
+            "restart": "on-failure",
+            "depends_on": {config.docker_follow_nodes[0].moniker: {"condition": "service_healthy"}},
             "ports": [
                 f"{http_rpc_port(n_port)}:{http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
                 f"{ws_rpc_port(n_port)}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
