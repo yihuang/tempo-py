@@ -915,8 +915,10 @@ class TestDockerCompose:
             assert parsed["services"]["node0"]["networks"]["test-net"]["ipv4_address"] == cfg.docker_ip(0)
             assert parsed["services"]["node1"]["networks"]["test-net"]["ipv4_address"] == cfg.docker_ip(1)
             # Command references docker-run.sh wrapper, not inline tempo args
-            assert "/data/node0/docker-run.sh" in content
-            assert "/data/node1/docker-run.sh" in content
+            assert "/data/docker-run.sh" in content
+            # Volumes mount individual node directories, not shared parent
+            assert f"{data_dir / 'node0'}:/data" in content
+            assert f"{data_dir / 'node1'}:/data" in content
             assert "--consensus.signing-key" not in content
 
     def test_docker_node_command_uses_container_paths(self) -> None:

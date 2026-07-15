@@ -689,8 +689,8 @@ def _generate_single_network_compose(config: DevnetConfig, data_dir: Path) -> di
         services[val.moniker] = {
             "image": config.docker_image,
             "entrypoint": ["/bin/sh"],
-            "command": f"{CONTAINER_DATA_DIR}/{val.dir_name}/docker-run.sh",
-            "volumes": [f"{data_dir}:{CONTAINER_DATA_DIR}"],
+            "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
+            "volumes": [f"{data_dir / val.dir_name}:{CONTAINER_DATA_DIR}"],
             "ports": published_ports,
             "networks": {config.docker_network: {"ipv4_address": config.docker_ip(index)}},
         }
@@ -778,8 +778,8 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
         services[val.moniker] = {
             "image": config.docker_image,
             "entrypoint": ["/bin/sh"],
-            "command": f"{CONTAINER_DATA_DIR}/{val.dir_name}/docker-run.sh",
-            "volumes": [f"{data_dir}:{CONTAINER_DATA_DIR}"],
+            "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
+            "volumes": [f"{data_dir / val.dir_name}:{CONTAINER_DATA_DIR}"],
             "ports": published_ports,
             # Only on validator network — NOT on public network
             "networks": {
@@ -804,8 +804,8 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
         services[f_moniker] = {
             "image": config.docker_image,
             "entrypoint": ["/bin/sh"],
-            "command": f"{CONTAINER_DATA_DIR}/{f_moniker}/docker-run.sh",
-            "volumes": [f"{data_dir}:{CONTAINER_DATA_DIR}"],
+            "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
+            "volumes": [f"{data_dir / f_moniker}:{CONTAINER_DATA_DIR}"],
             "ports": [
                 f"{http_rpc_port(f_port)}:{http_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
                 f"{ws_rpc_port(f_port)}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}",
@@ -834,8 +834,8 @@ def _generate_two_network_compose(config: DevnetConfig, data_dir: Path) -> dict[
         services[p_moniker] = {
             "image": config.docker_image,
             "entrypoint": ["/bin/sh"],
-            "command": f"{CONTAINER_DATA_DIR}/{p_moniker}/docker-run.sh",
-            "volumes": [f"{data_dir}:{CONTAINER_DATA_DIR}"],
+            "command": f"{CONTAINER_DATA_DIR}/docker-run.sh",
+            "volumes": [f"{data_dir / p_moniker}:{CONTAINER_DATA_DIR}"],
             "ports": [
                 f"{p_port}:{execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)}",
             ],
