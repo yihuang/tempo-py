@@ -609,9 +609,7 @@ def _docker_proxy_trusted_peers(
             continue
         proxy_host = proxy.moniker
         proxy_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
-        peers.append(
-            f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}"
-        )
+        peers.append(f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}")
     return peers
 
 
