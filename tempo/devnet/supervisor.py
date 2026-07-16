@@ -638,7 +638,8 @@ def _docker_follow_node_command(
     val_ws_ip = config.docker_ip(0)
     upstream_ws = f"ws://{val_ws_ip}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
-    trusted_peers = _docker_proxy_trusted_peers(config, data_dir)
+    # Peer with the validators (for tx gossip → inclusion) and the proxies.
+    trusted_peers = _docker_trusted_peers(config, data_dir) + _docker_proxy_trusted_peers(config, data_dir)
 
     args = _build_follow_node_args(
         config.tempo_bin,
