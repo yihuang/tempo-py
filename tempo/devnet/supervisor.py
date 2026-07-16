@@ -601,7 +601,10 @@ def _docker_proxy_trusted_peers(
     """
     peers: list[str] = []
     for proxy in config.docker_p2p_proxies:
-        enode_id_file = data_dir / proxy.moniker / "enode.identity"
+        p_dir = data_dir / proxy.moniker
+        p_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_enode_keypair(p_dir)
+        enode_id_file = p_dir / "enode.identity"
         if not enode_id_file.exists():
             continue
         proxy_host = proxy.moniker
