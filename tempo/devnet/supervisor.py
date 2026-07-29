@@ -7,6 +7,7 @@ import json
 import secrets
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import jsonmerge
@@ -452,49 +453,26 @@ def _prepare_periphery_dir(
     return svc_dir
 
 
-def _docker_proxy_trusted_peers(
-    config: DevnetConfig,
+def _docker_service_trusted_peers(
+    services: Sequence[FollowNodeConfig | P2PProxyConfig],
     data_dir: Path,
 ) -> list[str]:
-    """Build ``--trusted-peers`` entries for all P2P proxies.
+    """Build ``--trusted-peers`` entries for periphery services (follow nodes, P2P proxies).
 
-    Each entry uses the proxy's Docker service name (resolvable via internal
-    DNS) and its execution-layer P2P port.
+    Each entry uses the service's Docker name (internal DNS) and the fixed
+    execution-layer P2P port.  Enode keypairs are materialized on demand, so
+    callers don't depend on the service dir having been prepared first.
     """
     peers: list[str] = []
-    for proxy in config.docker_p2p_proxies:
-        p_dir = data_dir / proxy.moniker
-        p_dir.mkdir(parents=True, exist_ok=True)
-        _ensure_enode_keypair(p_dir)
-        enode_id_file = p_dir / "enode.identity"
+    p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
+    for svc in services:
+        svc_dir = data_dir / svc.moniker
+        svc_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_enode_keypair(svc_dir)
+        enode_id_file = svc_dir / "enode.identity"
         if not enode_id_file.exists():
             continue
-        proxy_host = proxy.moniker
-        proxy_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
-        peers.append(f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}")
-    return peers
-
-
-def _docker_follow_trusted_peers(
-    config: DevnetConfig,
-    data_dir: Path,
-) -> list[str]:
-    """Build ``--trusted-peers`` entries for all follow nodes.
-
-    Each entry uses the follow node's Docker service name (resolvable on the
-    public network) and its execution-layer P2P port.  The follow node's enode
-    keypair is materialized on demand, like ``_docker_proxy_trusted_peers``.
-    """
-    peers: list[str] = []
-    for follow in config.docker_follow_nodes:
-        f_dir = data_dir / follow.moniker
-        f_dir.mkdir(parents=True, exist_ok=True)
-        _ensure_enode_keypair(f_dir)
-        enode_id_file = f_dir / "enode.identity"
-        if not enode_id_file.exists():
-            continue
-        follow_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
-        peers.append(f"enode://{enode_id_file.read_text().strip()}@{follow.moniker}:{follow_p2p_port}")
+        peers.append(f"enode://{enode_id_file.read_text().strip()}@{svc.moniker}:{p2p_port}")
     return peers
 
 
@@ -522,7 +500,9 @@ def _docker_follow_node_command(
     upstream_ws = f"ws://{val_ws_ip}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
     # Peer with the validators (for tx gossip → inclusion) and the proxies.
-    trusted_peers = _docker_trusted_peers(config, data_dir) + _docker_proxy_trusted_peers(config, data_dir)
+    trusted_peers = _docker_trusted_peers(config, data_dir) + _docker_service_trusted_peers(
+        config.docker_p2p_proxies, data_dir
+    )
 
     args = _build_follow_node_args(
         config.tempo_bin,
@@ -596,7 +576,9 @@ def _docker_public_node_command(
     upstream_ws = f"ws://{upstream_moniker}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
     # Peer with the follower (tx-gossip path to validators) and the proxies.
-    trusted_peers = _docker_follow_trusted_peers(config, data_dir) + _docker_proxy_trusted_peers(config, data_dir)
+    trusted_peers = _docker_service_trusted_peers(follow_nodes, data_dir) + _docker_service_trusted_peers(
+        config.docker_p2p_proxies, data_dir
+    )
 
     args = _build_follow_node_args(
         config.tempo_bin,
