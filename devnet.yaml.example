@@ -5,6 +5,11 @@
 # Usage:
 #   tempo-devnet serve --data ./data --config ./devnet.yaml
 
+# Node backend (default: tempo). "allegro" runs the reth + simplex-consensus
+# fork; its binaries default to allegro / allegro-xtask (override with
+# tempo_bin / tempo_xtask_bin). Docker mode is tempo-only for now.
+# backend: tempo
+
 # Chain ID (default: 1337)
 chain_id: 1337
 

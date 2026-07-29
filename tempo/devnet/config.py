@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from .ports import find_free_base_ports
+
 DEFAULT_CHAIN_ID = 1337
 DEFAULT_BASE_PORT = 8000
 DEFAULT_EPOCH_LENGTH = 100
@@ -16,6 +18,7 @@ DEFAULT_ACCOUNTS = 10_000
 DEFAULT_MNEMONIC = "test test test test test test test test test test test junk"
 DEFAULT_TEMPO_BIN = "tempo"
 DEFAULT_TEMPO_XTASK_BIN = "tempo-xtask"
+DEFAULT_BACKEND = "tempo"
 
 # Fixed internal ports — each container has its own netns, so every validator
 # reuses the same numbers (offsets 0..5, mirroring ports.py).
@@ -177,8 +180,12 @@ class DevnetConfig:
         self.gas_limit: int = data.get("gas_limit", DEFAULT_GAS_LIMIT)
         self.seed: int | None = data.get("seed")
         self.mnemonic: str = data.get("mnemonic", DEFAULT_MNEMONIC)
-        self.tempo_bin: str = data.get("tempo_bin", DEFAULT_TEMPO_BIN)
-        self.tempo_xtask_bin: str = data.get("tempo_xtask_bin", DEFAULT_TEMPO_XTASK_BIN)
+        # Node backend (see backends.py); binary names default to the backend name.
+        self.backend: str = data.get("backend", DEFAULT_BACKEND)
+        default_bin = DEFAULT_TEMPO_BIN if self.backend == DEFAULT_BACKEND else self.backend
+        default_xtask = DEFAULT_TEMPO_XTASK_BIN if self.backend == DEFAULT_BACKEND else f"{self.backend}-xtask"
+        self.tempo_bin: str = data.get("tempo_bin", default_bin)
+        self.tempo_xtask_bin: str = data.get("tempo_xtask_bin", default_xtask)
         self.no_dkg_in_genesis: bool = data.get("no_dkg_in_genesis", False)
         self.no_extra_tokens: bool = data.get("no_extra_tokens", False)
         self.no_pairwise_liquidity: bool = data.get("no_pairwise_liquidity", False)
@@ -308,6 +315,32 @@ class DevnetConfig:
         return str(network.network_address + DOCKER_PUBLIC_IP_HOST_OCTET_BASE + index)
 
     @classmethod
+    def ephemeral(
+        cls,
+        n: int,
+        *,
+        backend: str = DEFAULT_BACKEND,
+        chain_id: int = DEFAULT_CHAIN_ID,
+        host: str = "127.0.0.1",
+        node_bin: str | None = None,
+        xtask_bin: str | None = None,
+    ) -> DevnetConfig:
+        """A throwaway ``n``-validator config on free base ports (tests/CI)."""
+        data: dict[str, Any] = {
+            "backend": backend,
+            "chain_id": chain_id,
+            "validators": [
+                {"host": host, "port": b, "moniker": f"node{i}", "rpc_host": host}
+                for i, b in enumerate(find_free_base_ports(n))
+            ],
+        }
+        if node_bin:
+            data["tempo_bin"] = node_bin
+        if xtask_bin:
+            data["tempo_xtask_bin"] = xtask_bin
+        return cls(data)
+
+    @classmethod
     def load(cls, path: str | Path) -> DevnetConfig:
         """Load config from a YAML file."""
         path = Path(path)
@@ -358,6 +391,8 @@ class DevnetConfig:
             "mnemonic": self.mnemonic,
             "validators": [v.to_dict() for v in self.validators],
         }
+        if self.backend != DEFAULT_BACKEND:
+            d["backend"] = self.backend
         if self.seed is not None:
             d["seed"] = self.seed
         if self.no_dkg_in_genesis:

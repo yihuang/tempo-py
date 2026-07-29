@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +28,7 @@ import fire
 import yaml
 from supervisor.supervisorctl import main as supervisorctl_main
 
+from .backends import generate_localnet, get_backend
 from .cluster import ClusterCLI
 from .config import DevnetConfig
 from .supervisor import (
@@ -63,35 +63,16 @@ def _ensure_tempo_bins(config: DevnetConfig, *, require_node_bin: bool = True) -
         missing.append(config.tempo_bin)
     if missing:
         print(f"Error: required binaries not found on PATH: {', '.join(missing)}", file=sys.stderr)
-        print("Make sure tempo and tempo-xtask are installed and on your PATH.", file=sys.stderr)
+        print(
+            f"Make sure {config.tempo_bin} and {config.tempo_xtask_bin} are installed and on your PATH.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     if not node_bin_present:  # only reached in Docker mode (require_node_bin=False)
         print(
             f"Note: {config.tempo_bin!r} not on host PATH; expected inside the Docker image {config.docker_image!r}.",
             file=sys.stderr,
         )
-
-
-def _rename_validator_dirs(data_dir: Path, config: DevnetConfig, *, docker: bool = False) -> None:
-    """Rename each validator's ``ip:port`` dir (named by its ``--validators``
-    socket) to its moniker.  In Docker mode that socket is the container static
-    IP (:meth:`DevnetConfig.docker_validator_addr`), not the host ``ip:port``.
-    """
-    rename_map: list[tuple[Path, Path]] = []
-    for index, val in enumerate(config.validators):
-        src_name = config.docker_validator_addr(index) if docker else val.addr_str
-        src = data_dir / src_name
-        dst = data_dir / val.dir_name
-        if src == dst:
-            continue
-        if src.exists():
-            if dst.exists():
-                shutil.rmtree(dst)
-            rename_map.append((src, dst))
-
-    for src, dst in rename_map:
-        src.rename(dst)
-        print(f"  renamed {src.name} -> {dst.name}")
 
 
 def init(
@@ -125,6 +106,11 @@ def init(
             if hasattr(cfg, k) and v is not None:
                 setattr(cfg, k, v)
 
+    backend = get_backend(cfg)
+    if gen_compose_file and backend.name != "tempo":
+        print(f"Error: docker mode is not supported for backend {backend.name!r}", file=sys.stderr)
+        sys.exit(1)
+
     # In Docker mode the node binary runs inside the image, not on the host.
     _ensure_tempo_bins(cfg, require_node_bin=not gen_compose_file)
 
@@ -139,22 +125,17 @@ def init(
     else:
         data_dir.mkdir(parents=True)
 
-    # Build and run tempo-xtask generate-localnet
-    xtask_args = [cfg.tempo_xtask_bin, "generate-localnet", "--output", str(data_dir), "--force"]
-
-    # Docker mode bakes container static IPs into genesis (host loopback ports
-    # would resolve to the container itself); otherwise use the host addresses.
+    # Generate the localnet layout (genesis + node key material) via the
+    # backend's xtask. Docker mode bakes container static IPs into genesis
+    # (host loopback ports would resolve to the container itself).
     genesis_validators = cfg.docker_validators_arg if gen_compose_file else None
-    xtask_args.extend(cfg.to_genesis_args(genesis_validators))
-
-    print(f"Running: {' '.join(xtask_args)}")
-    result = subprocess.run(xtask_args, capture_output=False)
-    if result.returncode != 0:
-        print(f"Error: tempo-xtask failed with exit code {result.returncode}", file=sys.stderr)
+    try:
+        generate_localnet(
+            cfg, data_dir, validators_arg=genesis_validators, docker=gen_compose_file, capture_output=False
+        )
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-
-    # Rename validator dirs from ip:port to moniker names
-    _rename_validator_dirs(data_dir, cfg, docker=gen_compose_file)
 
     # Save a copy of the config in the data directory for later use
     config_dst = data_dir / "devnet.yaml"
