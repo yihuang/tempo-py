@@ -7,31 +7,29 @@ import json
 import secrets
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import jsonmerge
 import tomlkit
 import yaml
 
+from .backends import _build_common_node_args, get_backend
 from .config import (
+    DOCKER_CONSENSUS_P2P_PORT,
     DevnetConfig,
     FollowNodeConfig,
     P2PProxyConfig,
     PublicNodeConfig,
     ValidatorConfig,
-    DOCKER_CONSENSUS_P2P_PORT,
 )
 from .ports import (
-    authrpc_port,
-    consensus_metrics_port,
-    consensus_p2p_port,
     execution_p2p_port,
     http_rpc_port,
     ws_rpc_port,
 )
 
 SUPERVISOR_CONFIG_FILE = "supervisord.ini"
-LOCALNET_SIGNING_KEY_SECRET = "tempo-localnet-signing-key-secret"
 
 
 COMMON_PROG_OPTIONS: dict[str, str] = {
@@ -57,133 +55,6 @@ def _trusted_peers(config: DevnetConfig, data_dir: Path) -> list[str]:
         exec_port = execution_p2p_port(val.base_port)
         peers.append(f"enode://{enode_identity_file.read_text().strip()}@{val.host}:{exec_port}")
     return peers
-
-
-def write_secret_file(val_dir: Path) -> Path:
-    """Write the signing-key passphrase to a ``.secret`` file in the node dir.
-
-    Returns the path to the secret file.
-    """
-    secret_path = val_dir / ".secret"
-    secret_path.write_text(LOCALNET_SIGNING_KEY_SECRET)
-    return secret_path
-
-
-def _build_common_node_args(
-    *,
-    tempo_bin: str,
-    base_port: int,
-    listen_addr: str,
-    metrics_addr: str,
-    rpc_addr: str,
-    genesis_path: str,
-    datadir: str,
-    signing_key: str,
-    signing_share: str,
-    secret_file: str,
-    enode_key: str,
-    trusted_peers: list[str],
-    extra_flags: list[str] | None = None,
-    include_bootnodes_endpoint: bool = False,
-) -> list[str]:
-    """Build the argument list for ``tempo node``.
-
-    Shared core used by native (supervisor) and both Docker topology modes.
-    Callers provide the specific addresses, port base, and trusted-peers
-    appropriate for their deployment mode.
-
-    Args:
-        listen_addr: IP for ``--consensus.listen-address``.
-        metrics_addr: IP for ``--consensus.metrics-address``.
-        rpc_addr: IP for ``--http.addr`` / ``--ws.addr``.
-    """
-    peers_str = ",".join(trusted_peers)
-
-    args: list[str] = [
-        tempo_bin,
-        "node",
-        "--consensus.signing-key",
-        signing_key,
-        "--consensus.secret",
-        secret_file,
-        "--consensus.signing-share",
-        signing_share,
-        "--consensus.listen-address",
-        f"{listen_addr}:{consensus_p2p_port(base_port)}",
-        "--consensus.metrics-address",
-        f"{metrics_addr}:{consensus_metrics_port(base_port)}",
-        "--chain",
-        genesis_path,
-        "--datadir",
-        datadir,
-        "--port",
-        str(execution_p2p_port(base_port)),
-        "--discovery.port",
-        str(execution_p2p_port(base_port)),
-        "--p2p-secret-key",
-        enode_key,
-        "--trusted-peers",
-        peers_str,
-        "--authrpc.port",
-        str(authrpc_port(base_port)),
-        "--http",
-        "--http.addr",
-        rpc_addr,
-        "--http.port",
-        str(http_rpc_port(base_port)),
-        "--http.api",
-        "all",
-        "--ws",
-        "--ws.addr",
-        rpc_addr,
-        "--ws.port",
-        str(ws_rpc_port(base_port)),
-        "--consensus.use-local-defaults",
-        "--consensus.allow-private-ips",
-    ]
-
-    if include_bootnodes_endpoint:
-        args.append("--tempo.bootnodes-endpoint")
-        args.append("none")
-
-    if extra_flags:
-        args.extend(extra_flags)
-
-    return args
-
-
-def _build_node_args(
-    *,
-    tempo_bin: str,
-    p2p_host: str,
-    rpc_host: str,
-    host: str,
-    base_port: int,
-    genesis_path: str,
-    datadir: str,
-    signing_key: str,
-    signing_share: str,
-    secret_file: str,
-    enode_key: str,
-    trusted_peers: list[str],
-    extra_flags: list[str] | None = None,
-) -> list[str]:
-    """Build the argument list for ``tempo node`` (native/supervisor mode)."""
-    return _build_common_node_args(
-        tempo_bin=tempo_bin,
-        base_port=base_port,
-        listen_addr=p2p_host,
-        metrics_addr=host,
-        rpc_addr=rpc_host,
-        genesis_path=genesis_path,
-        datadir=datadir,
-        signing_key=signing_key,
-        signing_share=signing_share,
-        secret_file=secret_file,
-        enode_key=enode_key,
-        trusted_peers=trusted_peers,
-        extra_flags=extra_flags,
-    )
 
 
 def _write_run_script_content(
@@ -333,8 +204,6 @@ def generate_supervisor_config(
     if dst.exists() and not force:
         return dst
 
-    tempo_bin = config.tempo_bin
-
     ini = configparser.RawConfigParser()
     ini.add_section("supervisord")
     ini["supervisord"] = {
@@ -357,30 +226,24 @@ def generate_supervisor_config(
     ini.add_section("supervisorctl")
     ini["supervisorctl"] = {"serverurl": f"unix://{sock}"}
 
-    # Derive trusted peers from enode identity files
+    # Derive trusted peers from enode identity files (empty for backends
+    # without enode key material, e.g. allegro)
     peers = _trusted_peers(config, data_dir)
+    backend = get_backend(config)
 
-    for val in config.validators:
+    for index, val in enumerate(config.validators):
         val_dir = data_dir / val.dir_name
         prgname = f"program:{val.dir_name}"
         ini.add_section(prgname)
 
-        # Write the secret file for --consensus.secret
-        write_secret_file(val_dir)
-
         # All paths are relative — the wrapper script cds to the node dir first
-        node_args = _build_node_args(
-            tempo_bin=tempo_bin,
-            p2p_host=val.p2p_host,
-            rpc_host=val.rpc_host,
-            host=val.host,
-            base_port=val.base_port,
+        node_args = backend.node_args(
+            config,
+            val,
+            index,
+            val_dir=val_dir,
             genesis_path="./genesis.json",
             datadir=".",
-            signing_key="./signing.key",
-            signing_share="./signing.share",
-            secret_file="./.secret",
-            enode_key="./enode.key",
             trusted_peers=peers,
             extra_flags=config.patch_node_flags or None,
         )
@@ -590,49 +453,26 @@ def _prepare_periphery_dir(
     return svc_dir
 
 
-def _docker_proxy_trusted_peers(
-    config: DevnetConfig,
+def _docker_service_trusted_peers(
+    services: Sequence[FollowNodeConfig | P2PProxyConfig],
     data_dir: Path,
 ) -> list[str]:
-    """Build ``--trusted-peers`` entries for all P2P proxies.
+    """Build ``--trusted-peers`` entries for periphery services (follow nodes, P2P proxies).
 
-    Each entry uses the proxy's Docker service name (resolvable via internal
-    DNS) and its execution-layer P2P port.
+    Each entry uses the service's Docker name (internal DNS) and the fixed
+    execution-layer P2P port.  Enode keypairs are materialized on demand, so
+    callers don't depend on the service dir having been prepared first.
     """
     peers: list[str] = []
-    for proxy in config.docker_p2p_proxies:
-        p_dir = data_dir / proxy.moniker
-        p_dir.mkdir(parents=True, exist_ok=True)
-        _ensure_enode_keypair(p_dir)
-        enode_id_file = p_dir / "enode.identity"
+    p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
+    for svc in services:
+        svc_dir = data_dir / svc.moniker
+        svc_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_enode_keypair(svc_dir)
+        enode_id_file = svc_dir / "enode.identity"
         if not enode_id_file.exists():
             continue
-        proxy_host = proxy.moniker
-        proxy_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
-        peers.append(f"enode://{enode_id_file.read_text().strip()}@{proxy_host}:{proxy_p2p_port}")
-    return peers
-
-
-def _docker_follow_trusted_peers(
-    config: DevnetConfig,
-    data_dir: Path,
-) -> list[str]:
-    """Build ``--trusted-peers`` entries for all follow nodes.
-
-    Each entry uses the follow node's Docker service name (resolvable on the
-    public network) and its execution-layer P2P port.  The follow node's enode
-    keypair is materialized on demand, like ``_docker_proxy_trusted_peers``.
-    """
-    peers: list[str] = []
-    for follow in config.docker_follow_nodes:
-        f_dir = data_dir / follow.moniker
-        f_dir.mkdir(parents=True, exist_ok=True)
-        _ensure_enode_keypair(f_dir)
-        enode_id_file = f_dir / "enode.identity"
-        if not enode_id_file.exists():
-            continue
-        follow_p2p_port = execution_p2p_port(DOCKER_CONSENSUS_P2P_PORT)
-        peers.append(f"enode://{enode_id_file.read_text().strip()}@{follow.moniker}:{follow_p2p_port}")
+        peers.append(f"enode://{enode_id_file.read_text().strip()}@{svc.moniker}:{p2p_port}")
     return peers
 
 
@@ -660,7 +500,9 @@ def _docker_follow_node_command(
     upstream_ws = f"ws://{val_ws_ip}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
     # Peer with the validators (for tx gossip → inclusion) and the proxies.
-    trusted_peers = _docker_trusted_peers(config, data_dir) + _docker_proxy_trusted_peers(config, data_dir)
+    trusted_peers = _docker_trusted_peers(config, data_dir) + _docker_service_trusted_peers(
+        config.docker_p2p_proxies, data_dir
+    )
 
     args = _build_follow_node_args(
         config.tempo_bin,
@@ -734,7 +576,9 @@ def _docker_public_node_command(
     upstream_ws = f"ws://{upstream_moniker}:{ws_rpc_port(DOCKER_CONSENSUS_P2P_PORT)}"
 
     # Peer with the follower (tx-gossip path to validators) and the proxies.
-    trusted_peers = _docker_follow_trusted_peers(config, data_dir) + _docker_proxy_trusted_peers(config, data_dir)
+    trusted_peers = _docker_service_trusted_peers(follow_nodes, data_dir) + _docker_service_trusted_peers(
+        config.docker_p2p_proxies, data_dir
+    )
 
     args = _build_follow_node_args(
         config.tempo_bin,
@@ -787,6 +631,9 @@ def generate_docker_compose(
 
     Requires the tempo Docker image specified in ``config.docker_image``.
     """
+    if config.backend != "tempo":
+        raise NotImplementedError(f"docker mode is not supported for backend {config.backend!r}")
+
     # Absolute path so the volume source is a bind mount, not a named volume.
     data_dir = data_dir.resolve()
 

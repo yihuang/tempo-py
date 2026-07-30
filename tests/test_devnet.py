@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import stat
 import tempfile
 from pathlib import Path
 
-import json
 import jsonmerge
 import tomlkit
 import yaml
 
+from tempo.devnet.backends import (
+    LOCALNET_SIGNING_KEY_SECRET,
+    _build_common_node_args,
+    generate_localnet,
+    get_backend,
+    write_secret_file,
+)
 from tempo.devnet.cluster import ClusterCLI
-
 from tempo.devnet.config import (
     DevnetConfig,
     ValidatorConfig,
@@ -22,30 +28,26 @@ from tempo.devnet.config import (
 from tempo.devnet.ports import (
     PORTS_PER_NODE,
     authrpc_port,
-    find_free_base_ports,
     consensus_metrics_port,
     consensus_p2p_port,
     execution_p2p_port,
+    find_free_base_ports,
     http_rpc_port,
     ws_rpc_port,
 )
 from tempo.devnet.supervisor import (
-    LOCALNET_SIGNING_KEY_SECRET,
-    apply_genesis_patch,
-    generate_docker_compose,
-    generate_supervisor_config,
-    write_docker_run_script,
-    write_run_script,
-    write_reth_config,
-    write_secret_file,
-    _build_node_args,
     _docker_follow_node_command,
     _docker_node_command,
     _docker_node_two_network_command,
     _docker_p2p_proxy_command,
     _sh_quote,
+    apply_genesis_patch,
+    generate_docker_compose,
+    generate_supervisor_config,
+    write_docker_run_script,
+    write_reth_config,
+    write_run_script,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test helpers — reduce boilerplate for setting up validator directories
@@ -392,14 +394,14 @@ class TestDevnetConfig:
 
 
 class TestBuildNodeArgs:
-    """_build_node_args — argument list construction."""
+    """_build_common_node_args — argument list construction."""
 
     def test_returns_list(self) -> None:
-        args = _build_node_args(
+        args = _build_common_node_args(
             tempo_bin="tempo",
-            p2p_host="127.0.0.1",
-            rpc_host="0.0.0.0",
-            host="127.0.0.1",
+            listen_addr="127.0.0.1",
+            rpc_addr="0.0.0.0",
+            metrics_addr="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
             datadir="/d",
@@ -414,11 +416,11 @@ class TestBuildNodeArgs:
         assert args[1] == "node"
 
     def test_port_values(self) -> None:
-        args = _build_node_args(
+        args = _build_common_node_args(
             tempo_bin="tempo",
-            p2p_host="127.0.0.1",
-            rpc_host="0.0.0.0",
-            host="127.0.0.1",
+            listen_addr="127.0.0.1",
+            rpc_addr="0.0.0.0",
+            metrics_addr="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
             datadir="/d",
@@ -442,11 +444,11 @@ class TestBuildNodeArgs:
         assert "8005" in args  # base+5
 
     def test_uses_secret_file(self) -> None:
-        args = _build_node_args(
+        args = _build_common_node_args(
             tempo_bin="tempo",
-            p2p_host="127.0.0.1",
-            rpc_host="0.0.0.0",
-            host="127.0.0.1",
+            listen_addr="127.0.0.1",
+            rpc_addr="0.0.0.0",
+            metrics_addr="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
             datadir="/d",
@@ -462,11 +464,11 @@ class TestBuildNodeArgs:
 
     def test_p2p_and_rpc_hosts_in_args(self) -> None:
         """p2p_host controls consensus listen-address; rpc_host controls http/ws bind."""
-        args = _build_node_args(
+        args = _build_common_node_args(
             tempo_bin="tempo",
-            p2p_host="10.0.1.2",
-            rpc_host="0.0.0.0",
-            host="10.0.1.2",
+            listen_addr="10.0.1.2",
+            rpc_addr="0.0.0.0",
+            metrics_addr="10.0.1.2",
             base_port=8000,
             genesis_path="/g.json",
             datadir="/d",
@@ -496,11 +498,11 @@ class TestWriteRunScript:
         with tempfile.TemporaryDirectory() as tmpdir:
             val_dir = Path(tmpdir) / "node0"
             val_dir.mkdir(parents=True)
-            node_args = _build_node_args(
+            node_args = _build_common_node_args(
                 tempo_bin="tempo",
-                p2p_host="127.0.0.1",
-                rpc_host="0.0.0.0",
-                host="127.0.0.1",
+                listen_addr="127.0.0.1",
+                rpc_addr="0.0.0.0",
+                metrics_addr="127.0.0.1",
                 base_port=8000,
                 genesis_path="/g.json",
                 datadir="/d",
@@ -767,11 +769,11 @@ class TestPatches:
             assert not (val_dir / "reth.toml").exists()
 
     def test_extra_flags_in_node_args(self) -> None:
-        args = _build_node_args(
+        args = _build_common_node_args(
             tempo_bin="tempo",
-            p2p_host="127.0.0.1",
-            rpc_host="0.0.0.0",
-            host="127.0.0.1",
+            listen_addr="127.0.0.1",
+            rpc_addr="0.0.0.0",
+            metrics_addr="127.0.0.1",
             base_port=8000,
             genesis_path="/g.json",
             datadir="/d",
@@ -1262,3 +1264,132 @@ class TestFindFreeBasePorts:
 
     def test_blocks_stay_under_the_port_ceiling(self) -> None:
         assert max(find_free_base_ports(4)) + PORTS_PER_NODE < 65536
+
+
+class TestBackends:
+    """Backend dispatch: tempo default unchanged, allegro variant."""
+
+    def test_default_backend_is_tempo(self) -> None:
+        cfg = DevnetConfig({})
+        assert cfg.backend == "tempo"
+        assert cfg.tempo_bin == "tempo"
+        assert cfg.tempo_xtask_bin == "tempo-xtask"
+        assert get_backend(cfg).name == "tempo"
+
+    def test_allegro_backend_defaults_bins(self) -> None:
+        cfg = DevnetConfig({"backend": "allegro"})
+        assert cfg.tempo_bin == "allegro"
+        assert cfg.tempo_xtask_bin == "allegro-xtask"
+        assert "backend" in cfg.to_dict()
+
+    def test_unknown_backend_raises(self) -> None:
+        cfg = DevnetConfig({"backend": "geth"})
+        try:
+            get_backend(cfg)
+        except ValueError as e:
+            assert "geth" in str(e)
+        else:
+            raise AssertionError("expected ValueError")
+
+    def test_allegro_localnet_args(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "backend": "allegro",
+                "chain_id": 1337,
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
+        args = get_backend(cfg).localnet_args(cfg, Path("/data"))
+        assert args[0] == "allegro-xtask"
+        assert args[1] == "genesis"
+        assert "127.0.0.1:8000,127.0.0.1:8010" == args[args.index("--validators") + 1]
+
+    def test_allegro_node_args(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "backend": "allegro",
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            val = cfg.validators[1]
+            args = get_backend(cfg).node_args(
+                cfg,
+                val,
+                1,
+                val_dir=Path(tmpdir),
+                genesis_path="./genesis.json",
+                datadir=".",
+                trusted_peers=[],
+            )
+        assert args[:2] == ["allegro", "node"]
+        assert args[args.index("--consensus.node-index") + 1] == "1"
+        assert args[args.index("--consensus.listen-address") + 1] == "127.0.0.1:8010"
+        assert args[args.index("--http.port") + 1] == str(http_rpc_port(8010))
+        assert args[args.index("--ws.port") + 1] == str(ws_rpc_port(8010))
+        assert args[args.index("--authrpc.port") + 1] == str(authrpc_port(8010))
+        assert args[args.index("--port") + 1] == str(execution_p2p_port(8010))
+        # no tempo key material, no peer flags — peers come from genesis
+        assert "--consensus.signing-key" not in args
+        assert "--consensus.peer" not in args
+
+    def test_allegro_supervisor_config(self) -> None:
+        cfg = DevnetConfig(
+            {
+                "backend": "allegro",
+                "validators": [
+                    {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
+                    {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
+                ],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = Path(tmpdir)
+            get_backend(cfg).prepare_layout(cfg, data_dir)
+            dst = generate_supervisor_config(cfg, data_dir, force=True)
+            content = dst.read_text()
+            assert "program:node0" in content and "program:node1" in content
+            run_sh = (data_dir / "node0" / "run.sh").read_text()
+            assert "'allegro'" in run_sh and "'--consensus.node-index'" in run_sh
+            # tempo's secret file must not be written for allegro
+            assert not (data_dir / "node0" / ".secret").exists()
+
+    def test_docker_mode_rejected_for_allegro(self) -> None:
+        cfg = DevnetConfig({"backend": "allegro"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                generate_docker_compose(cfg, Path(tmpdir), force=True)
+            except NotImplementedError:
+                pass
+            else:
+                raise AssertionError("expected NotImplementedError")
+
+
+class TestEphemeralAndGenerateLocalnet:
+    def test_ephemeral_config(self) -> None:
+        cfg = DevnetConfig.ephemeral(2, backend="allegro", chain_id=7777, node_bin="/x/allegro", xtask_bin="/x/xt")
+        assert cfg.backend == "allegro"
+        assert cfg.chain_id == 7777
+        assert cfg.tempo_bin == "/x/allegro"
+        assert cfg.tempo_xtask_bin == "/x/xt"
+        assert len(cfg.validators) == 2
+        assert cfg.validators[0].moniker == "node0"
+        assert cfg.validators[0].rpc_host == "127.0.0.1"
+        # distinct free base-port blocks
+        assert cfg.validators[0].base_port != cfg.validators[1].base_port
+
+    def test_generate_localnet_raises_on_failure(self) -> None:
+        cfg = DevnetConfig.ephemeral(1, backend="allegro", xtask_bin="/bin/false")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                generate_localnet(cfg, Path(tmpdir))
+            except (RuntimeError, OSError):
+                pass
+            else:
+                raise AssertionError("expected failure")
