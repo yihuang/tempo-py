@@ -1,0 +1,187 @@
+# Three-Tier Production Topology (NVNM Chain L1 reference architecture)
+#
+# Validators are isolated on a private network and are NEVER contacted by the
+# public-facing RPC tier. Blocks flow down through an internal RPC tier;
+# transactions flow back up the same chain over devp2p gossip.
+#
+# This is the topology documented in docs/nvnm/02-architecture.md. It differs
+# from examples/two-network.yaml in one important way: there are NO p2p proxies.
+# See "Why no p2p_proxies" below.
+#
+# ---------------------------------------------------------------------------
+# Tier mapping
+# ---------------------------------------------------------------------------
+# There is exactly ONE non-validator node role: a `tempo node --follow` full
+# node. The config keys below are positions, not node types.
+#
+#   config key       tier            follows            exposed
+#   ---------------- --------------- ------------------ --------------------
+#   validators       validator       (consensus)        no
+#   follow_nodes     rpc / internal  validator0 (WS)    no public network
+#   public_nodes     rpc / public    internal0 (WS)     RPC + WS on host
+#
+# ---------------------------------------------------------------------------
+# Network layout
+# ---------------------------------------------------------------------------
+#
+#   Validator Network (10.88.0.0/24)     Public Network (10.89.0.0/24)
+#   ┌───────────────────────────────┐   ┌────────────────────────────────────┐
+#   │ node0      10.88.0.10         │   │                                    │
+#   │ node1      10.88.0.11         │   │                                    │
+#   │ node2      10.88.0.12         │   │                                    │
+#   │ node3      10.88.0.13         │   │                                    │
+#   │   consensus P2P + RPC + WS    │   │                                    │
+#   │   no public network interface │   │                                    │
+#   │                               │   │                                    │
+#   │ internal0  10.88.0.14 ────────┼───┼─ 10.89.0.14  (dual-homed)          │
+#   │ internal1  10.88.0.15 ────────┼───┼─ 10.89.0.15  (dual-homed)          │
+#   └───────────────────────────────┘   │                                    │
+#                                       │ public0    10.89.0.16              │
+#                                       │ public1    10.89.0.17              │
+#                                       │   public network ONLY              │
+#                                       │   never reaches a validator        │
+#                                       └────────────────────────────────────┘
+#
+# Data flow (two independent paths, verified against the generated run scripts):
+#
+#   blocks down (WS :8005, --follow)
+#     node0 10.88.0.10 --> internal0/internal1 --> public0/public1
+#
+#   txs up (execution devp2p :8001, --trusted-peers)
+#     public0/public1 --> internal0/internal1 --> node0,node1,node2,node3
+#
+# The `--follow` stream is block ingest only and carries no transactions.
+# Transaction propagation rides execution-layer devp2p, which the generator
+# wires hop-by-hop. Confirmed in the emitted docker-run.sh scripts:
+#
+#   internal0  --follow ws://10.88.0.10:8005
+#              --trusted-peers enode://…@node0:8001,…@node1:8001,
+#                              …@node2:8001,…@node3:8001
+#   public0    --follow ws://internal0:8005
+#              --trusted-peers enode://…@internal0:8001,…@internal1:8001
+#
+# Note public0 peers with NO validator on either path — that is the isolation
+# boundary this topology exists to create.
+#
+# Every hop independently verifies the BLS threshold finality certificate
+# before accepting a block, so chaining does not weaken trust: an intermediate
+# node can stall or withhold, but cannot forge or serve a fork.
+#
+# `--trusted-peers` is only populated if `tempo` is on PATH at `init` time —
+# the generator shells out to it to derive each enode identity. If you see
+# "warning: failed to derive enode identity", blocks will still flow but
+# submitted transactions will NOT reach a proposer.
+#
+# ---------------------------------------------------------------------------
+# Why no p2p_proxies
+# ---------------------------------------------------------------------------
+# `tempo p2p-proxy` is built with a noop provider and a bare devp2p
+# NetworkManager (bin/tempo/src/p2p_proxy.rs). It has NO RPC server and NO
+# WebSocket listener, so it can never be a `--follow` upstream. It also sets
+# disable_tx_gossip(true) and returns empty GetPooledTransactions, so it
+# contributes nothing to transaction propagation.
+#
+# It exists to serve GetBlockHeaders/GetBlockBodies over devp2p to external
+# reth-compatible peers. Add it only if third parties need that; it is not part
+# of the internal RPC topology.
+#
+# ---------------------------------------------------------------------------
+# Published ports on host
+# ---------------------------------------------------------------------------
+#   node0      HTTP :8004  WS :8005      (devnet convenience only)
+#   node1      HTTP :8014  WS :8015
+#   node2      HTTP :8024  WS :8025
+#   node3      HTTP :8034  WS :8035
+#   internal0  HTTP :9004  WS :9005
+#   internal1  HTTP :9014  WS :9015
+#   public0    HTTP :6004  WS :6005      <-- point wallets/tests here
+#   public1    HTTP :6014  WS :6015
+#
+# Only the +4 (HTTP) and +5 (WS) offsets are published in Docker mode, so the
+# consensus/execution P2P ports (+0/+1) never bind on the host.
+#
+# ---------------------------------------------------------------------------
+# Usage — Docker Compose ONLY
+# ---------------------------------------------------------------------------
+# Two-network mode is activated by `docker.validator_network` and is only
+# honoured by the compose generator. Running this config in native/supervisord
+# mode silently ignores the tiering and starts validators alone.
+#
+#   tempo-devnet init --data ./data --config examples/three-tier.yaml --gen-compose-file
+#   docker compose -f ./data/docker-compose.yaml up -d
+#
+# Verify — hit the PUBLIC tier, which is furthest from the validators:
+#
+#   curl http://127.0.0.1:6004 -X POST -H "Content-Type: application/json" \
+#     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+#
+# A rising block number only proves the block path. To prove the tx path works
+# end to end (the thing a 2-hop gossip chain can silently break), submit a
+# transaction to public0 and assert a receipt — see docs/nvnm/04-runbook.md.
+#
+# ---------------------------------------------------------------------------
+# Prerequisites
+# ---------------------------------------------------------------------------
+#   cargo build --profile profiling --bin tempo --bin tempo-xtask
+#   docker buildx bake tempo --load
+#   export PATH=$PWD/target/profiling:$PATH
+
+chain_id: 1337
+accounts: 100
+epoch_length: 100
+gas_limit: 500000000
+seed: 42
+
+validators:
+  - host: 127.0.0.1
+    port: 8000
+    moniker: node0
+  - host: 127.0.0.1
+    port: 8010
+    moniker: node1
+  - host: 127.0.0.1
+    port: 8020
+    moniker: node2
+  - host: 127.0.0.1
+    port: 8030
+    moniker: node3
+
+docker:
+  image: ghcr.io/tempoxyz/tempo:latest
+
+  # Private validator network — consensus P2P and internal RPC/WS.
+  validator_network:
+    name: tempo-validator-net
+    subnet: 10.88.0.0/24
+
+  # Public-facing network — the only network the public tier sits on.
+  public_network:
+    name: tempo-public-net
+    subnet: 10.89.0.0/24
+
+  # --- rpc tier=internal --------------------------------------------------
+  # Dual-homed. Follows validator0 over WS on the validator network, and peers
+  # with all validators over devp2p so transactions can reach a proposer.
+  # This is the ONLY tier that touches a validator.
+  #
+  # NOTE: the generator makes every public node follow follow_nodes[0]. So
+  # internal1 is a warm spare, not a second upstream — repointing after an
+  # internal0 failure is currently manual. Same single-upstream limitation
+  # discussed in docs/nvnm/02-architecture.md.
+  follow_nodes:
+    - moniker: internal0
+      port: 9000
+    - moniker: internal1
+      port: 9010
+
+  # --- rpc tier=public ----------------------------------------------------
+  # Public network only. Follows internal0 over WS and peers with the internal
+  # tier over devp2p. Has no route to any validator on either path.
+  public_nodes:
+    - moniker: public0
+      port: 6000
+    - moniker: public1
+      port: 6010
+
+  # --- p2p_proxies: intentionally omitted ---------------------------------
+  # See "Why no p2p_proxies" above.

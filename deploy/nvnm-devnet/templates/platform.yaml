@@ -1,0 +1,319 @@
+{{- $root := . }}
+{{- if .Values.serviceAccount.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccount.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.monitoring.enabled }}
+---
+# ---------------------------------------------------------------------------
+# GMP — consensus layer (Commonware). Covers validators and all RPC tiers.
+# Key series: tempo_consensus_view, tempo_consensus_epoch,
+#             tempo_consensus_finalizations_total,
+#             tempo_dkg_manager_ceremony_players
+# ---------------------------------------------------------------------------
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: {{ .Values.chain.network }}-consensus
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" . }}
+  endpoints:
+    - port: consensus-prom
+      interval: {{ .Values.monitoring.scrapeInterval }}
+      metricRelabeling:
+        - action: drop
+          sourceLabels: [__name__]
+          regex: {{ .Values.monitoring.dropMetricsRegex | quote }}
+  targetLabels:
+    fromPod:
+      - from: nodeRole
+      - from: rpcTier
+      - from: validatorIndex
+      - from: chainNetwork
+      - from: app.kubernetes.io/version
+        to: chain_version
+---
+# ---------------------------------------------------------------------------
+# GMP — execution layer (reth)
+# ---------------------------------------------------------------------------
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: {{ .Values.chain.network }}-execution
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" . }}
+  endpoints:
+    - port: exec-prom
+      interval: {{ .Values.monitoring.scrapeInterval }}
+      metricRelabeling:
+        - action: drop
+          sourceLabels: [__name__]
+          regex: {{ .Values.monitoring.dropMetricsRegex | quote }}
+  targetLabels:
+    fromPod:
+      - from: nodeRole
+      - from: rpcTier
+      - from: validatorIndex
+      - from: chainNetwork
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.rpc.tiers.internal.enabled }}
+---
+# ---------------------------------------------------------------------------
+# Internal RPC tier ingress lockdown.
+#
+# This tier runs --http.api with `debug` and `trace` enabled, which expose state
+# dumps and full execution traces. Without this policy any pod in any namespace
+# could reach them.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.chain.network }}-rpc-internal-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" . }}
+      nodeRole: rpc
+      rpcTier: internal
+  policyTypes: [Ingress]
+  ingress:
+    # Downstream public tier: block follow (WS) + transaction gossip (devp2p)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "nvnm.name" . }}
+              nodeRole: rpc
+              rpcTier: public
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.wsRpc }}}
+        - {protocol: TCP, port: {{ .Values.ports.executionP2p }}}
+    # Peers within the tier
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "nvnm.name" . }}
+              nodeRole: rpc
+              rpcTier: internal
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.executionP2p }}}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gmp-system
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.consensusMetrics }}}
+        - {protocol: TCP, port: {{ .Values.ports.executionMetrics }}}
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+---
+# ---------------------------------------------------------------------------
+# NetworkPolicy — enforces the tier boundaries the architecture depends on.
+# Requires Dataplane V2 (datapath_provider = ADVANCED_DATAPATH on this cluster).
+#
+# Validators accept:
+#   consensus P2P  <- validators only
+#   execution p2p  <- validators + internal RPC tier   (transaction path)
+#   WS             <- internal RPC tier only           (block follow path)
+#   metrics        <- gmp-system
+# Nothing else in the cluster can reach a validator.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.chain.network }}-validator-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" . }}
+      nodeRole: validator
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "nvnm.name" . }}
+              nodeRole: validator
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.consensusP2p }}}
+        - {protocol: TCP, port: {{ .Values.ports.executionP2p }}}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "nvnm.name" . }}
+              nodeRole: rpc
+              rpcTier: internal
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.wsRpc }}}
+        - {protocol: TCP, port: {{ .Values.ports.executionP2p }}}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gmp-system
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.consensusMetrics }}}
+        - {protocol: TCP, port: {{ .Values.ports.executionMetrics }}}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.rpc.tiers.public.enabled }}
+---
+# ---------------------------------------------------------------------------
+# The public RPC tier must never reach a validator on ANY path. This policy
+# constrains its egress to the internal tier, DNS, and the Google APIs the
+# key-decrypt initContainer needs.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.chain.network }}-rpc-public-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" . }}
+      nodeRole: rpc
+      rpcTier: public
+  policyTypes: [Egress]
+  egress:
+    # Block follow (WS) + transaction gossip (devp2p) to the internal tier only
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "nvnm.name" . }}
+              nodeRole: rpc
+              rpcTier: internal
+      ports:
+        - {protocol: TCP, port: {{ .Values.ports.wsRpc }}}
+        - {protocol: TCP, port: {{ .Values.ports.executionP2p }}}
+    # kube-dns
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # GKE metadata server — Workload Identity token for `gcloud kms decrypt`.
+    # WITHOUT THIS the decrypt-keys initContainer hangs and every public pod
+    # sits in Init:0/1 forever, presenting as a KMS/IAM error, not a network one.
+    - to:
+        - ipBlock: {cidr: 169.254.169.254/32}
+    # Google APIs (KMS, Secret Manager) over TLS. RFC1918 is excluded so this
+    # rule cannot become a backdoor into the validator subnet.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - {protocol: TCP, port: 443}
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.rpc.tiers.public.enabled }}
+{{- $publicSvc := printf "%s-rpc-public" .Values.chain.network }}
+---
+# ---------------------------------------------------------------------------
+# Emissary ingress — PUBLIC RPC TIER ONLY.
+# Locked behind Cloudflare via the emissary-ingress Service
+# `loadBalancerSourceRanges`, set at the platform level.
+# ---------------------------------------------------------------------------
+apiVersion: getambassador.io/v3alpha1
+kind: Host
+metadata:
+  name: {{ .Values.chain.network }}-rpc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+  annotations:
+    external-dns.ambassador-service: emissary-ingress.emissary
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  hostname: {{ .Values.ingress.hostnames.rpc }}
+  acmeProvider:
+    authority: none
+  tlsSecret:
+    name: {{ .Values.ingress.tlsSecret }}
+  requestPolicy:
+    insecure:
+      action: Redirect
+---
+apiVersion: getambassador.io/v3alpha1
+kind: Mapping
+metadata:
+  name: {{ .Values.chain.network }}-rpc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+spec:
+  hostname: {{ .Values.ingress.hostnames.rpc }}
+  prefix: /
+  service: {{ $publicSvc }}.{{ .Release.Namespace }}:{{ .Values.ports.httpRpc }}
+  resolver: endpoint
+  load_balancer:
+    policy: maglev
+    header: CF-Connecting-IP
+  timeout_ms: {{ .Values.ingress.timeoutMs }}
+  cors:
+    origins: "*"
+    methods: [POST, OPTIONS]
+    headers: [Content-Type]
+---
+apiVersion: getambassador.io/v3alpha1
+kind: Host
+metadata:
+  name: {{ .Values.chain.network }}-ws
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+  annotations:
+    external-dns.ambassador-service: emissary-ingress.emissary
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+spec:
+  hostname: {{ .Values.ingress.hostnames.ws }}
+  acmeProvider:
+    authority: none
+  tlsSecret:
+    name: {{ .Values.ingress.tlsSecret }}
+---
+apiVersion: getambassador.io/v3alpha1
+kind: Mapping
+metadata:
+  name: {{ .Values.chain.network }}-ws
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" . | nindent 4 }}
+spec:
+  hostname: {{ .Values.ingress.hostnames.ws }}
+  prefix: /
+  service: {{ $publicSvc }}.{{ .Release.Namespace }}:{{ .Values.ports.wsRpc }}
+  resolver: endpoint
+  allow_upgrade: [websocket]
+  load_balancer:
+    policy: maglev
+    header: CF-Connecting-IP
+  timeout_ms: 300000
+{{- end }}

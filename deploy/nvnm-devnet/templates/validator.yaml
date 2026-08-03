@@ -1,0 +1,236 @@
+{{- include "nvnm.validateRequired" . }}
+{{- $root := . }}
+{{- range $i := until (int .Values.validator.count) }}
+{{- $peers := include "nvnm.validatorTrustedPeers" (list $root $i) }}
+---
+# ---------------------------------------------------------------------------
+# Validator {{ $i }} — headless Service
+# ClusterIP only. Validators are NEVER exposed through Emissary or a LoadBalancer.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $root.Values.chain.network }}-validator-{{ $i }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+    nodeRole: validator
+    validatorIndex: {{ $i | quote }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+    nodeRole: validator
+    validatorIndex: {{ $i | quote }}
+  ports:
+    - {name: consensus-p2p, port: {{ $root.Values.ports.consensusP2p }}, protocol: TCP}
+    - {name: consensus-prom, port: {{ $root.Values.ports.consensusMetrics }}, protocol: TCP}
+    - {name: exec-p2p, port: {{ $root.Values.ports.executionP2p }}, protocol: TCP}
+    - {name: evm-ws, port: {{ $root.Values.ports.wsRpc }}, protocol: TCP}
+    - {name: exec-prom, port: {{ $root.Values.ports.executionMetrics }}, protocol: TCP}
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: {{ $root.Values.chain.network }}-validator-{{ $i }}-keys
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+spec:
+  refreshInterval: {{ $root.Values.keyCustody.externalSecretRefreshInterval }}
+  secretStoreRef:
+    name: gcp-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: {{ $root.Values.chain.network }}-validator-{{ $i }}-keys
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    # ed25519 consensus + P2P identity
+    - secretKey: signing.key.enc
+      remoteRef:
+        key: {{ $root.Values.keyCustody.secretManagerPrefix }}-validator-{{ $i }}-signing-key
+    # BLS12-381 threshold share — UNIQUE PER VALIDATOR, never shared
+    - secretKey: signing.share.enc
+      remoteRef:
+        key: {{ $root.Values.keyCustody.secretManagerPrefix }}-validator-{{ $i }}-signing-share
+    # secp256k1 devp2p identity — stable so downstream tiers can pin it
+    - secretKey: enode.key.enc
+      remoteRef:
+        key: {{ $root.Values.keyCustody.secretManagerPrefix }}-validator-{{ $i }}-enode-key
+---
+# ---------------------------------------------------------------------------
+# Validator {{ $i }} — StatefulSet
+#
+# replicas: 1 and one StatefulSet per identity is DELIBERATE:
+#   * the BLS signing share must never be held by two processes
+#   * lockstep upgrades need per-validator start/stop control (OnDelete)
+# Availability comes from validator COUNT (3f+1), not from replicas.
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $root.Values.chain.network }}-validator-{{ $i }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+    nodeRole: validator
+    validatorIndex: {{ $i | quote }}
+spec:
+  serviceName: {{ $root.Values.chain.network }}-validator-{{ $i }}
+  replicas: 1
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: {{ $root.Values.validator.updateStrategy }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+      nodeRole: validator
+      validatorIndex: {{ $i | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "nvnm.labels" $root | nindent 8 }}
+        nodeRole: validator
+        validatorIndex: {{ $i | quote }}
+      annotations:
+        # DKG resharing at the epoch boundary requires all validators online.
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    spec:
+      serviceAccountName: {{ $root.Values.serviceAccount.name }}
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        {{- include "nvnm.podSecurityContext" $root | nindent 8 }}
+      {{- with $root.Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $root.Values.validator.computeClass }}
+      nodeSelector:
+        cloud.google.com/compute-class: {{ $root.Values.validator.computeClass }}
+      tolerations:
+        - {key: dedicated, operator: Equal, value: nvnm-validator, effect: NoSchedule}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          # Correlated node loss must not take out a quorum.
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+                  nodeRole: validator
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          # ScheduleAnyway: the ComputeClass may lack capacity in every zone,
+          # and a validator in the "wrong" zone beats a Pending one.
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+              nodeRole: validator
+      initContainers:
+        {{- include "nvnm.decryptInitContainer" (list $root "signing.key signing.share enode.key" false) | nindent 8 }}
+      containers:
+        - name: nvnm-node
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          args:
+            - node
+            - --chain=/genesis/genesis.json
+            - --datadir=/data
+            - --consensus.signing-key=/secrets/signing.key
+            - --consensus.signing-share=/secrets/signing.share
+            - --consensus.listen-address=0.0.0.0:{{ $root.Values.ports.consensusP2p }}
+            - --consensus.metrics-address=0.0.0.0:{{ $root.Values.ports.consensusMetrics }}
+            {{- include "nvnm.consensusArgs" $root | nindent 12 }}
+            # Execution devp2p — the transaction path. Validators peer only
+            # with each other and (inbound) the internal RPC tier.
+            {{- include "nvnm.devp2pArgs" (list $root $peers) | nindent 12 }}
+            # WS is required so the internal tier can --follow this node.
+            # HTTP JSON-RPC is deliberately NOT enabled on validators.
+            - --ws
+            - --ws.addr=0.0.0.0
+            - --ws.port={{ $root.Values.ports.wsRpc }}
+            - --metrics=0.0.0.0:{{ $root.Values.ports.executionMetrics }}
+          env:
+            - name: RUST_LOG
+              value: {{ $root.Values.logging.rustLog | quote }}
+          ports:
+            - {name: consensus-p2p, containerPort: {{ $root.Values.ports.consensusP2p }}, protocol: TCP}
+            - {name: consensus-prom, containerPort: {{ $root.Values.ports.consensusMetrics }}, protocol: TCP}
+            - {name: exec-p2p, containerPort: {{ $root.Values.ports.executionP2p }}, protocol: TCP}
+            - {name: evm-ws, containerPort: {{ $root.Values.ports.wsRpc }}, protocol: TCP}
+            - {name: exec-prom, containerPort: {{ $root.Values.ports.executionMetrics }}, protocol: TCP}
+          securityContext:
+            {{- include "nvnm.containerSecurityContext" $root | nindent 12 }}
+          resources:
+            {{- toYaml $root.Values.validator.resources | nindent 12 }}
+          startupProbe:
+            # Generous: a cold node backfills from peers at ~8 blocks/sec.
+            tcpSocket: {port: consensus-p2p}
+            failureThreshold: 120
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: consensus-p2p}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet: {path: /metrics, port: consensus-prom}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 4
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: secrets, mountPath: /secrets, readOnly: true}
+            - {name: genesis, mountPath: /genesis, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: ciphertext
+          secret:
+            secretName: {{ $root.Values.chain.network }}-validator-{{ $i }}-keys
+            defaultMode: 0400
+        # tmpfs — plaintext key material never touches disk
+        - name: secrets
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+        - name: genesis
+          configMap:
+            name: {{ $root.Values.chain.genesisConfigMap }}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "nvnm.labels" $root | nindent 10 }}
+          nodeRole: validator
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ $root.Values.validator.persistence.storageClass }}
+        resources:
+          requests:
+            storage: {{ $root.Values.validator.persistence.size }}
+{{- if $root.Values.validator.podDisruptionBudget.enabled }}
+---
+# minAvailable: 1 on a 1-replica STS blocks ALL voluntary eviction of this
+# validator — node drains, autoscaler consolidation and GKE maintenance all
+# refuse. Intentional; operators drain deliberately via the runbook.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $root.Values.chain.network }}-validator-{{ $i }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+      nodeRole: validator
+      validatorIndex: {{ $i | quote }}
+{{- end }}
+{{- end }}

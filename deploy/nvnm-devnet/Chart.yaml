@@ -1,0 +1,22 @@
+apiVersion: v2
+name: nvnm-devnet
+description: |
+  NVNM Chain L1 (Tempo fork — reth + Commonware Simplex BFT) internal testnet.
+  Deploys N validator StatefulSets (one per validator identity, replicas: 1 each,
+  no HA by design — the BLS signing share must never be shared) plus two
+  `tempo node --follow` RPC tiers (internal and public) serving EVM JSON-RPC
+  and WebSocket.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - blockchain
+  - evm
+  - tempo
+  - nvnm
+maintainers:
+  - name: MANTRA InfraSec
+    email: gcp-devops@mantra.finance
+annotations:
+  mantra.finance/environment: sandbox
+  mantra.finance/chain-type: evm-l1-tempo-fork

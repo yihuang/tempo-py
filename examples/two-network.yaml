@@ -8,7 +8,7 @@
 #   Validator Network (10.88.0.0/24)      Public Network (10.89.0.0/24)
 #   ┌──────────────────────────────┐    ┌──────────────────────────────────┐
 #   │ node0 (10.88.0.10)           │    │ follower0 (10.89.0.14)           │
-#   │   P2P + RPC + WS (internal) │WS──┤   RPC/WS, --follow ws://node0   │
+#   │   P2P + RPC + WS (internal)  │WS──┤   RPC/WS, --follow ws://node0   │
 #   │ node1 (10.88.0.11)           │    │ proxy0 (10.89.0.15)             │
 #   │ node2 (10.88.0.12)           │RPC─┤   p2p-proxy, serves blocks      │
 #   │ node3 (10.88.0.13)           │    │ public0 (10.89.0.16)            │

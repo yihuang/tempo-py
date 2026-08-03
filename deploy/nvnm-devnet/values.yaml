@@ -1,0 +1,195 @@
+# NVNM Chain L1 internal testnet — sandbox (asia-east2)
+#
+# Three-tier topology (see docs/nvnm/02-architecture.md):
+#
+#   validator            consensus, BLS share, never exposed
+#   rpc tier=internal    --follow validator, no ingress, only tier touching validators
+#   rpc tier=public      --follow internal, Cloudflare-fronted
+#
+# IMPORTANT: --consensus.* flags have NO config-file and NO env-var equivalent.
+# They must be passed as CLI arguments. That is why consensus tuning lives here
+# and is templated into `args`, not into a ConfigMap.
+# Source: g-mantra/NVNMChain docs/architecture/deploy.md
+
+# ---------------------------------------------------------------------------
+# Chain identity
+# ---------------------------------------------------------------------------
+chain:
+  # DECISION D-B — network name. Must NOT collide with the existing Cosmos
+  # chain `nvnm-dryrun-1` in this same cluster.
+  network: nvnm-tempo-devnet-1
+
+  # DECISION D-A — EVM chain ID. UNSET ON PURPOSE.
+  # Taken in this sandbox already: 262144 (nvnm-dryrun-1), 7888 (mantra-canary-net-1).
+  # Upstream Tempo uses 42431 (Moderato testnet) — do not reuse.
+  evmChainId: ""
+
+  # Genesis JSON produced offline by `tempo-xtask generate-genesis`.
+  genesisConfigMap: nvnm-genesis
+
+# ---------------------------------------------------------------------------
+# Image
+# ---------------------------------------------------------------------------
+# DECISION D-C — no NVNM Tempo-fork image exists yet.
+image:
+  repository: ghcr.io/nvnm-chain/nvnm-node
+  tag: ""            # must be an immutable tag or digest — never `latest`
+  pullPolicy: IfNotPresent
+  pullSecrets:
+    - name: ghcr-io-secret
+
+# ---------------------------------------------------------------------------
+# Ports — PRODUCTION scheme (NVNMChain docs/architecture/deploy.md)
+# ---------------------------------------------------------------------------
+# NOTE: this is NOT the devnet scheme. tempo-devnet derives ports as
+# base_port+N (consensus 8000, exec-p2p 8001, consensus-metrics 8002,
+# engine 8003, http 8004, ws 8005). Production uses fixed ports where 8001 is
+# consensus metrics and execution devp2p is reth's default 30303.
+ports:
+  consensusP2p: 8000        # --consensus.listen-address
+  consensusMetrics: 8001    # --consensus.metrics-address
+  executionP2p: 30303       # --port / --discovery.port  (reth devp2p)
+  httpRpc: 8545
+  wsRpc: 8546
+  executionMetrics: 9001    # --metrics
+
+# ---------------------------------------------------------------------------
+# Consensus timing — single-region asia-east2 profile (<=5ms RTT)
+# ---------------------------------------------------------------------------
+consensus:
+  targetBlockTime: "500ms"
+  waitForProposal: "1200ms"      # >= targetBlockTime * 2
+  waitForNotarizations: "1000ms" # >= targetBlockTime * 1.5
+  # Tempo's same-region default. The 2*P95 rule gives ~10ms at <=5ms RTT, but
+  # we keep 50ms as headroom for GKE pod-network jitter. Tighten only against
+  # measured P95 from the running cluster.
+  networkBudget: "50ms"
+  synchronyBound: "5s"           # >= max(targetBlockTime, 2s) for NTP skew
+  workerThreads: 3
+  messageBacklog: 16384
+  allowPrivateIps: true          # pod IPs are RFC1918
+  bypassIpCheck: false           # MUST stay false
+
+# ---------------------------------------------------------------------------
+# Key custody — GCP KMS envelope decrypted into tmpfs
+# ---------------------------------------------------------------------------
+keyCustody:
+  kms:
+    project: mantra-chain-sandbox
+    location: global
+    keyring: mantra-chain-sandbox-global
+    key: nvnm-tempo-devnet-1-validator-key
+  secretManagerPrefix: nvnm-tempo-devnet-1
+  externalSecretRefreshInterval: 1h
+  decryptImage: google/cloud-sdk:slim
+
+# ---------------------------------------------------------------------------
+# devp2p peer identities
+# ---------------------------------------------------------------------------
+# Blocks flow DOWN over WS (--follow). Transactions flow UP over execution
+# devp2p (--trusted-peers). Without this the chain looks healthy but submitted
+# transactions never reach a proposer.
+#
+# These are the 128-hex-char enode node IDs (no `enode://` prefix, no @host)
+# emitted by the genesis ceremony — see docs/nvnm/04-runbook.md §2.
+# Leave empty ONLY for a deliberate block-path-only smoke test. Nothing warns
+# you: the chart renders fine, blocks flow, and transactions are never mined.
+enodes:
+  validator: []   # one per validator, ordered by index
+  internal: []    # one per internal RPC replica, ordered by ordinal
+
+# ---------------------------------------------------------------------------
+# Validators — one StatefulSet per identity, replicas: 1, NO HA by design.
+# N=4 => f=1 Byzantine fault tolerated, quorum 2f+1 = 3.
+# ---------------------------------------------------------------------------
+validator:
+  count: 4
+  updateStrategy: OnDelete      # lockstep upgrades — GAP-8
+  computeClass: nvnm-validator-class
+  resources:
+    requests: {cpu: "4", memory: 16Gi}
+    limits: {cpu: "8", memory: 48Gi}
+  persistence:
+    storageClass: premium-rwo-xfs
+    size: 200Gi
+  # One PDB per validator, minAvailable: 1 over a 1-replica STS. Net effect:
+  # no validator can be voluntarily evicted. Intentional — DKG resharing needs
+  # all validators online at the epoch boundary.
+  podDisruptionBudget:
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# RPC tiers — same binary and role, different upstream and exposure.
+# ---------------------------------------------------------------------------
+rpc:
+  common:
+    updateStrategy: RollingUpdate
+    persistence:
+      storageClass: premium-rwo-xfs
+      size: 200Gi
+
+  tiers:
+    # --- tier=internal ----------------------------------------------------
+    # The ONLY tier that contacts a validator, on either path.
+    internal:
+      enabled: true
+      count: 2
+      upstream:
+        kind: validator         # follows validator[upstreamIndex] over WS
+        index: 0
+      peerWith: validator       # devp2p trusted-peers target
+      ingress: false
+      computeClass: ""          # cluster default (spot acceptable)
+      # debug/trace deliberately enabled here but NOT on the public tier.
+      httpApi: "eth,net,web3,txpool,trace,debug"
+      resources:
+        requests: {cpu: "2", memory: 8Gi}
+        limits: {cpu: "6", memory: 32Gi}
+
+    # --- tier=public ------------------------------------------------------
+    # Public network face. No route to a validator on either path.
+    public:
+      enabled: true
+      count: 2
+      upstream:
+        kind: rpc
+        tier: internal          # follows the internal tier over WS
+        index: 0
+      peerWith: internal        # devp2p trusted-peers target
+      ingress: true
+      computeClass: ""
+      httpApi: "eth,net,web3,txpool"
+      resources:
+        requests: {cpu: "2", memory: 8Gi}
+        limits: {cpu: "6", memory: 32Gi}
+
+# ---------------------------------------------------------------------------
+# Ingress (Emissary) — public tier only.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false                # needs DNS zone + wildcard cert first (GAP-10)
+  hostnames:
+    rpc: rpc.nvnm-devnet.mantrachain.dev
+    ws: ws.nvnm-devnet.mantrachain.dev
+  tlsSecret: nvnm-devnet-wildcard-tls
+  timeoutMs: 60000
+
+# ---------------------------------------------------------------------------
+# Observability — Google Managed Prometheus
+# ---------------------------------------------------------------------------
+monitoring:
+  enabled: true
+  scrapeInterval: 15s
+  dropMetricsRegex: "(go_.+|process_.+|promhttp_.+)"
+
+logging:
+  gkeLoggingEnabled: true
+  rustLog: "info,tempo_consensus=info,tempo_execution=warn"
+
+serviceAccount:
+  create: true
+  name: nvnm-node
+  annotations: {}
+
+networkPolicy:
+  enabled: true

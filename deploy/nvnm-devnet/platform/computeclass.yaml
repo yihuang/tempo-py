@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# GKE ComputeClass for NVNM validators — ON-DEMAND ONLY.
+#
+# NOT part of the Helm chart: ComputeClass is cluster-scoped and belongs in the
+# platform repo (infra-argocd-gke-mantra), alongside the existing
+# `default` and `confidential-node-pool-class` definitions in
+#   sandbox/clusters/infrastructure-base/<cluster>/argocd-app-computeclass/
+#
+# WHY THIS EXISTS (GAP-3):
+# The existing `default` ComputeClass lists e2-highmem-8 SPOT as first priority.
+# Correlated spot preemption of 2 of 4 validators drops the network below the
+# 2f+1 = 3 quorum and halts block production. Validators must never run on spot.
+#
+# The taint keeps everything else off these (more expensive) nodes; the chart's
+# validator pods carry the matching toleration.
+# ---------------------------------------------------------------------------
+apiVersion: cloud.google.com/v1
+kind: ComputeClass
+metadata:
+  name: nvnm-validator-class
+spec:
+  priorities:
+    # e2-highmem-8 = 8 vCPU / 64 GiB. Meets Tempo's "8+ cores, 32 GiB" floor.
+    # Tempo *recommends* 16+ cores for validators — revisit before load testing.
+    # Machine Type Rule: `machineType` alone. Do NOT also set `machineFamily` —
+    # they are alternative rule forms, not combinable fields.
+    - machineType: e2-highmem-8
+      spot: false
+      storage:
+        bootDiskType: pd-balanced
+        bootDiskSize: 100
+    # Fallback to a larger shape rather than to spot.
+    - machineType: n2-standard-16
+      spot: false
+      storage:
+        bootDiskType: pd-balanced
+        bootDiskSize: 100
+  # DoNotScaleUp surfaces capacity problems as Pending pods with a clear event,
+  # rather than silently landing a validator on an unsuitable node.
+  whenUnsatisfiable: DoNotScaleUp
+  nodePoolAutoCreation:
+    enabled: true
+  autoscalingPolicy:
+    # Long consolidation delay: never bin-pack a validator off its node while a
+    # DKG epoch boundary might be in progress (GAP-7).
+    consolidationDelayMinutes: 120
+    consolidationThreshold: 95
+  nodePoolConfig:
+    autoRepair: true
+    # GAP-8: node upgrades must be operator-driven, never automatic.
+    autoUpgrade: false
+    taints:
+      - key: dedicated
+        value: nvnm-validator
+        effect: NoSchedule
+  activeMigration:
+    optimizeRulePriority: false

@@ -1,0 +1,258 @@
+{{- include "nvnm.validateRequired" . }}
+{{- $root := . }}
+{{- range $tier, $cfg := .Values.rpc.tiers }}
+{{- if and $cfg.enabled (gt (int $cfg.count) 0) }}
+{{- $name := printf "%s-rpc-%s" $root.Values.chain.network $tier }}
+{{- $peers := include "nvnm.trustedPeers" (list $root $cfg.peerWith) }}
+---
+# ===========================================================================
+# RPC tier: {{ $tier }}
+#
+# Same binary and same role as every other RPC tier — a `tempo node --follow`
+# full node. Tiers differ ONLY by:
+#   * what --follow points at   -> {{ $cfg.upstream.kind }}{{ if eq $cfg.upstream.kind "rpc" }}/{{ $cfg.upstream.tier }}{{ end }}
+#   * devp2p trusted-peers      -> {{ $cfg.peerWith }}
+#   * whether ingress fronts it -> {{ $cfg.ingress }}
+#
+# Holds an ed25519 key for consensus-P2P identity and a secp256k1 enode key
+# for devp2p, but NO BLS signing share, so it cannot participate in consensus.
+# ===========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+    nodeRole: rpc
+    rpcTier: {{ $tier }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+    nodeRole: rpc
+    rpcTier: {{ $tier }}
+  ports:
+    - {name: evm-rpc, port: {{ $root.Values.ports.httpRpc }}, targetPort: evm-rpc, protocol: TCP}
+    - {name: evm-ws, port: {{ $root.Values.ports.wsRpc }}, targetPort: evm-ws, protocol: TCP}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-headless
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+    nodeRole: rpc
+    rpcTier: {{ $tier }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+    nodeRole: rpc
+    rpcTier: {{ $tier }}
+  ports:
+    - {name: evm-rpc, port: {{ $root.Values.ports.httpRpc }}, protocol: TCP}
+    - {name: evm-ws, port: {{ $root.Values.ports.wsRpc }}, protocol: TCP}
+    - {name: exec-p2p, port: {{ $root.Values.ports.executionP2p }}, protocol: TCP}
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: {{ $name }}-keys
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+spec:
+  refreshInterval: {{ $root.Values.keyCustody.externalSecretRefreshInterval }}
+  secretStoreRef:
+    name: gcp-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: {{ $name }}-keys
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    # Per-ordinal keys: the initContainer selects <name>-<ordinal>.enc from the
+    # pod hostname suffix. Each replica needs a DISTINCT devp2p identity.
+    {{- range $n := until (int $cfg.count) }}
+    - secretKey: signing.key-{{ $n }}.enc
+      remoteRef:
+        key: {{ $root.Values.keyCustody.secretManagerPrefix }}-rpc-{{ $tier }}-{{ $n }}-signing-key
+    - secretKey: enode.key-{{ $n }}.enc
+      remoteRef:
+        key: {{ $root.Values.keyCustody.secretManagerPrefix }}-rpc-{{ $tier }}-{{ $n }}-enode-key
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+    nodeRole: rpc
+    rpcTier: {{ $tier }}
+spec:
+  serviceName: {{ $name }}-headless
+  replicas: {{ $cfg.count }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: {{ $root.Values.rpc.common.updateStrategy }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+      nodeRole: rpc
+      rpcTier: {{ $tier }}
+  template:
+    metadata:
+      labels:
+        {{- include "nvnm.labels" $root | nindent 8 }}
+        nodeRole: rpc
+        rpcTier: {{ $tier }}
+      annotations:
+        # RPC nodes hold no consensus role — safe to evict.
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+    spec:
+      serviceAccountName: {{ $root.Values.serviceAccount.name }}
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        {{- include "nvnm.podSecurityContext" $root | nindent 8 }}
+      {{- with $root.Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $cfg.computeClass }}
+      nodeSelector:
+        cloud.google.com/compute-class: {{ $cfg.computeClass }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+                    nodeRole: rpc
+                    rpcTier: {{ $tier }}
+                topologyKey: kubernetes.io/hostname
+      initContainers:
+        {{- include "nvnm.decryptInitContainer" (list $root "signing.key enode.key" true) | nindent 8 }}
+      containers:
+        - name: nvnm-node
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          args:
+            - node
+            # Blocks DOWN over WS. Certification is on by default; do NOT add
+            # --follow.nocertify — an uncertified follower does not run the
+            # consensus engine and so cannot serve a downstream tier.
+            - --follow={{ include "nvnm.upstreamWsUrl" (list $root $cfg) }}
+            - --chain=/genesis/genesis.json
+            - --datadir=/data
+            # Required for consensus-P2P identity even though this node never signs.
+            - --consensus.signing-key=/secrets/signing.key
+            - --consensus.metrics-address=0.0.0.0:{{ $root.Values.ports.consensusMetrics }}
+            {{- include "nvnm.consensusArgs" $root | nindent 12 }}
+            # Transactions UP over execution devp2p to the {{ $cfg.peerWith }} tier.
+            {{- include "nvnm.devp2pArgs" (list $root $peers) | nindent 12 }}
+            - --http
+            - --http.addr=0.0.0.0
+            - --http.port={{ $root.Values.ports.httpRpc }}
+            - --http.api={{ $cfg.httpApi }}
+            - --ws
+            - --ws.addr=0.0.0.0
+            - --ws.port={{ $root.Values.ports.wsRpc }}
+            - --metrics=0.0.0.0:{{ $root.Values.ports.executionMetrics }}
+          env:
+            - name: RUST_LOG
+              value: {{ $root.Values.logging.rustLog | quote }}
+          ports:
+            - {name: evm-rpc, containerPort: {{ $root.Values.ports.httpRpc }}, protocol: TCP}
+            - {name: evm-ws, containerPort: {{ $root.Values.ports.wsRpc }}, protocol: TCP}
+            - {name: exec-p2p, containerPort: {{ $root.Values.ports.executionP2p }}, protocol: TCP}
+            - {name: consensus-prom, containerPort: {{ $root.Values.ports.consensusMetrics }}, protocol: TCP}
+            - {name: exec-prom, containerPort: {{ $root.Values.ports.executionMetrics }}, protocol: TCP}
+          securityContext:
+            {{- include "nvnm.containerSecurityContext" $root | nindent 12 }}
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+          startupProbe:
+            # tcpSocket, not httpGet: a GET on the JSON-RPC endpoint returns
+            # 405 (POST/OPTIONS only), so an httpGet probe never passes.
+            tcpSocket: {port: evm-rpc}
+            failureThreshold: 120
+            periodSeconds: 10
+          readinessProbe:
+            # tcpSocket, NOT an exec+curl JSON-RPC check.
+            # The node image (DECISION D-C) does not exist yet and reth-derived
+            # images are frequently distroless — no /bin/sh, no curl. An exec
+            # probe against such an image never passes, the ClusterIP ends up
+            # with zero endpoints, and Emissary returns 503 while --follow keeps
+            # working on the headless Service (publishNotReadyAddresses: true).
+            # That is precisely the "looks healthy, isn't" mode this design
+            # tries to avoid.
+            #
+            # TODO once D-C lands: if the image ships sh+curl, switch to an
+            # eth_blockNumber exec probe for a stronger sync gate. The JSON-RPC
+            # assertion lives in the runbook verification section meanwhile.
+            tcpSocket: {port: evm-rpc}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 4
+          livenessProbe:
+            tcpSocket: {port: evm-rpc}
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: secrets, mountPath: /secrets, readOnly: true}
+            - {name: genesis, mountPath: /genesis, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: ciphertext
+          secret:
+            secretName: {{ $name }}-keys
+            defaultMode: 0400
+        - name: secrets
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+        - name: genesis
+          configMap:
+            name: {{ $root.Values.chain.genesisConfigMap }}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "nvnm.labels" $root | nindent 10 }}
+          nodeRole: rpc
+          rpcTier: {{ $tier }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ $root.Values.rpc.common.persistence.storageClass }}
+        resources:
+          requests:
+            storage: {{ $root.Values.rpc.common.persistence.size }}
+{{- if gt (int $cfg.count) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "nvnm.labels" $root | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nvnm.name" $root }}
+      nodeRole: rpc
+      rpcTier: {{ $tier }}
+{{- end }}
+{{- end }}
+{{- end }}
