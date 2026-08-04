@@ -153,5 +153,5 @@ you can mix and match these settings:
   (e.g., P2P limits, database size).
 - **`patch_node_flags`** — Append extra CLI flags to every `tempo node`
   invocation (e.g., `--txpool.*`, `--builder.*`).
-- **`t0_time` … `t8_time`** — Set hardfork activation timestamps
-  (default 0 = active at genesis).
+- **`t<N>_time`** — Set a hardfork activation timestamp (default: active at
+  genesis). See [Hardfork Scheduling](../docs/devnet.md#hardfork-scheduling).

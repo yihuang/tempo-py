@@ -261,6 +261,26 @@ Options:
 | ``--force``           | false            | Overwrite existing data directory        |
 | ``--gen-compose-file``| false            | Also generate ``docker-compose.yaml``     |
 
+## Hardfork Scheduling
+
+Every hardfork is active at genesis unless given a future activation time (0 and omitted
+mean the same).  Schedule one to launch the chain before a fork and cross the boundary
+while it runs:
+
+```yaml
+# Unix seconds; a time just after launch — `date -d '+2 minutes' +%s`
+t10_time: 1893456000
+```
+
+Any key shaped ``t<N>_time`` or ``t<N><letter>_time`` (T1 has lettered point releases,
+e.g. ``t1a_time``) becomes ``--t<N>-time``, so a new fork needs no ``tempo-py`` release.
+The generator stays the authority on which ones exist — ``tempo-xtask generate-genesis
+--help`` lists them, and scheduling an unknown one fails there naming the flag.  A
+misspelled key (``t1A_time``, ``T9_time``) is rejected at config load rather than ignored.
+
+Activation time also decides genesis *state*: a fork active at genesis can pre-install
+contracts that a scheduled one installs at the boundary instead.
+
 ## Config Patches
 
 After genesis generation, three optional patches can be applied:
