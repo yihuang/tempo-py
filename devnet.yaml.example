@@ -29,22 +29,9 @@ mnemonic: "test test test test test test test test test test test junk"
 # Fixed seed for deterministic key generation (omit for random)
 seed: 42
 
-# Hardfork activation timestamps (Unix seconds; 0 = active at genesis).
-# Set one to a future timestamp to launch before that fork and cross it while running.
-# t0_time: 0
-# t1_time: 0
-# t1a_time: 0
-# t1b_time: 0
-# t1c_time: 0
-# t2_time: 0
-# t3_time: 0
-# t4_time: 0
-# t5_time: 0
-# t6_time: 0
-# t7_time: 0
-# t8_time: 0
-# t9_time: 0
-# t10_time: 0
+# Hardfork activation. Any `t<N>_time` key is forwarded to the genesis generator; forks you
+# don't name activate at genesis. See docs/devnet.md#hardfork-scheduling.
+# t10_time: 1893456000   # Unix seconds; use a time just after launch, not this placeholder
 
 # Disable initial DKG in genesis (for dev mode)
 # no_dkg_in_genesis: false

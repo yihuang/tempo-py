@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from pathlib import Path
 from typing import Any
 
@@ -40,26 +41,35 @@ DEFAULT_DOCKER_PUBLIC_SUBNET = "10.89.0.0/24"
 DEFAULT_DOCKER_PUBLIC_NETWORK = "tempo-public-net"
 DOCKER_PUBLIC_IP_HOST_OCTET_BASE = 10
 
-# Hardfork timestamp attribute names, mirroring the post-Genesis variants of upstream's
-# `TempoHardfork` (tempo/crates/hardfork/src/lib.rs) — not a plain t0..tN range, since T1
-# has lettered point releases. Each name maps to its xtask flag by `_` -> `-`
-# (`t1a_time` -> `--t1a-time`). Append new forks here as upstream declares them.
-HARDFORK_ATTRS = [
-    "t0_time",
-    "t1_time",
-    "t1a_time",
-    "t1b_time",
-    "t1c_time",
-    "t2_time",
-    "t3_time",
-    "t4_time",
-    "t5_time",
-    "t6_time",
-    "t7_time",
-    "t8_time",
-    "t9_time",
-    "t10_time",
-]
+# Forks are matched by shape, not enumerated, so a new upstream one needs no change here. The
+# generator's own `--tN-time` flags stay the authority on which exist: an unknown fork fails
+# in clap naming the flag rather than being dropped here. The optional letter is T1's point
+# releases (`t1a_time`). See docs/devnet.md#hardfork-scheduling.
+HARDFORK_KEY_RE = re.compile(r"^t(\d+)([a-z]?)_time$")
+
+# Near-misses (`t1A_time`, `T9_time`, `t_9_time`) would otherwise look like unrelated config
+# and silently leave the fork at genesis. Narrow enough to not catch an ordinary `*_time` key.
+HARDFORK_TYPO_RE = re.compile(r"^t[\d_].*_time$", re.IGNORECASE)
+
+
+def parse_hardforks(data: dict[str, Any]) -> dict[str, int]:
+    """The hardforks ``data`` schedules, in activation order (``t1`` < ``t1a`` < ``t2`` < ``t10``).
+
+    Sorted here so arg-building and serialization both read the dict in fork order for free.
+    Forks at 0 are dropped — that is already the generator's default.
+    """
+    scheduled = []
+    for key, value in data.items():
+        if not (m := HARDFORK_KEY_RE.match(key)):
+            if HARDFORK_TYPO_RE.match(key):
+                raise ValueError(f"{key!r} is not a valid hardfork key; expected e.g. 't9_time' or 't1a_time'")
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"{key} must be an int (Unix seconds), got {value!r}")
+        if value:
+            number, letter = m.groups()
+            scheduled.append(((int(number), letter), key, value))
+    return {key: value for _, key, value in sorted(scheduled)}
 
 
 class ValidatorConfig:
@@ -208,9 +218,8 @@ class DevnetConfig:
         self.no_extra_tokens: bool = data.get("no_extra_tokens", False)
         self.no_pairwise_liquidity: bool = data.get("no_pairwise_liquidity", False)
 
-        # Hardfork timestamps (default 0 = active at genesis)
-        for hf in HARDFORK_ATTRS:
-            setattr(self, hf, data.get(hf, 0))
+        # Only scheduled forks are stored; the rest read back as 0 through __getattr__.
+        self.hardforks: dict[str, int] = parse_hardforks(data)
 
         # Optional patches
         patch_genesis = data.get("patch_genesis") or {}
@@ -358,6 +367,16 @@ class DevnetConfig:
             data["tempo_xtask_bin"] = xtask_bin
         return cls(data)
 
+    def __getattr__(self, name: str) -> int:
+        """Report any unscheduled hardfork as 0, so ``cfg.t13_time`` works before T13 ships.
+
+        Only consulted when normal lookup fails, so scheduled forks never reach here.
+        """
+        if HARDFORK_KEY_RE.match(name):
+            # via __dict__ so a lookup before __init__ finishes can't recurse
+            return self.__dict__.get("hardforks", {}).get(name, 0)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
     @classmethod
     def load(cls, path: str | Path) -> DevnetConfig:
         """Load config from a YAML file."""
@@ -393,10 +412,8 @@ class DevnetConfig:
             args.append("--no-extra-tokens")
         if self.no_pairwise_liquidity:
             args.append("--no-pairwise-liquidity")
-        for hf in HARDFORK_ATTRS:
-            val = getattr(self, hf)
-            if val != 0:
-                args.extend([f"--{hf.replace('_', '-')}", str(val)])
+        for hf, timestamp in self.hardforks.items():
+            args.extend([f"--{hf.replace('_', '-')}", str(timestamp)])
         return args
 
     def to_dict(self) -> dict[str, Any]:
@@ -419,10 +436,7 @@ class DevnetConfig:
             d["no_extra_tokens"] = True
         if self.no_pairwise_liquidity:
             d["no_pairwise_liquidity"] = True
-        for hf in HARDFORK_ATTRS:
-            val = getattr(self, hf)
-            if val != 0:
-                d[hf] = val
+        d.update(self.hardforks)
         if self.patch_genesis:
             d["patch_genesis"] = self.patch_genesis
         if self.patch_reth:
