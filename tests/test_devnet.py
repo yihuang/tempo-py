@@ -294,6 +294,21 @@ class TestDevnetConfig:
         assert "--t6-time" in args
         assert "200" in args
 
+    def test_hardfork_lettered_and_latest_forks(self) -> None:
+        """T1's lettered point releases and newest forks are schedulable."""
+        cfg = DevnetConfig({"t1a_time": 100, "t9_time": 200, "t10_time": 300})
+        assert (cfg.t1a_time, cfg.t9_time, cfg.t10_time) == (100, 200, 300)
+
+        args = cfg.to_genesis_args()
+        for flag, value in [("--t1a-time", "100"), ("--t9-time", "200"), ("--t10-time", "300")]:
+            assert args[args.index(flag) + 1] == value
+
+        # Scheduled forks survive a YAML round-trip, forks left at genesis stay out.
+        d = cfg.to_dict()
+        assert d["t10_time"] == 300
+        assert "t2_time" not in d
+        assert DevnetConfig(d).t10_time == 300
+
     # ------------------------------------------------------------------
     # Two-network topology tests
     # ------------------------------------------------------------------

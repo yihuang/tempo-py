@@ -40,8 +40,26 @@ DEFAULT_DOCKER_PUBLIC_SUBNET = "10.89.0.0/24"
 DEFAULT_DOCKER_PUBLIC_NETWORK = "tempo-public-net"
 DOCKER_PUBLIC_IP_HOST_OCTET_BASE = 10
 
-# Hardfork timestamp attribute names (t0_time … t8_time)
-HARDFORK_ATTRS = [f"t{i}_time" for i in range(9)]
+# Hardfork timestamp attribute names, mirroring the post-Genesis variants of upstream's
+# `TempoHardfork` (tempo/crates/hardfork/src/lib.rs) — not a plain t0..tN range, since T1
+# has lettered point releases. Each name maps to its xtask flag by `_` -> `-`
+# (`t1a_time` -> `--t1a-time`). Append new forks here as upstream declares them.
+HARDFORK_ATTRS = [
+    "t0_time",
+    "t1_time",
+    "t1a_time",
+    "t1b_time",
+    "t1c_time",
+    "t2_time",
+    "t3_time",
+    "t4_time",
+    "t5_time",
+    "t6_time",
+    "t7_time",
+    "t8_time",
+    "t9_time",
+    "t10_time",
+]
 
 
 class ValidatorConfig:
