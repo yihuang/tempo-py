@@ -1,5 +1,24 @@
 {{- include "nvnm.validateRequired" . }}
 {{- $root := . }}
+{{/* ===========================================================================
+     RENDERS NOTHING BY DEFAULT — validator.enabled is false. DECISION D-H.
+
+     Validators run on GCE VMs with reserved static internal IPs, because
+     Tempo's ValidatorConfigV2 enforces the address a node DIALS OUT FROM and
+     no GKE mechanism gives a Pod a stable egress IP. They are provisioned by
+     infrasec-governance-gcp/.../vm-nvnm-chain and configured by
+     chain-nvnm-ansible.
+
+     This file is KEPT, not deleted, for two reasons:
+       1. It documents precisely what an in-cluster validator would look like,
+          and therefore what the IP constraint costs us.
+       2. It still drives a throwaway all-GKE smoke test, which needs
+          consensus.bypassIpCheck: true to reach consensus at all.
+
+     If you are here because you want a local four-validator chain to poke at,
+     you want examples/three-tier.yaml, not this.
+     =========================================================================== */}}
+{{- if .Values.validator.enabled }}
 {{- range $i := until (int .Values.validator.count) }}
 {{- $peers := include "nvnm.validatorTrustedPeers" (list $root $i) }}
 ---
@@ -232,5 +251,6 @@ spec:
       app.kubernetes.io/name: {{ include "nvnm.name" $root }}
       nodeRole: validator
       validatorIndex: {{ $i | quote }}
+{{- end }}
 {{- end }}
 {{- end }}

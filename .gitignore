@@ -15,3 +15,6 @@ wheels/
 # devnet tests
 /devnet.yaml
 /data
+
+# development and test files
+data-iptest

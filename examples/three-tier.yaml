@@ -147,7 +147,15 @@ validators:
     moniker: node3
 
 docker:
-  image: ghcr.io/tempoxyz/tempo:latest
+  # Pinned, not `latest` — 1.12.0 is required for T9 (DECISION D-C/D-G) and must
+  # match the tempo/tempo-xtask binaries used to generate genesis.
+  #
+  # NOTE the tag has NO `v` prefix. GHCR publishes `1.12.0`, `1.12`,
+  # `sha-5ec0336`, `latest`, `edge` — there is no `v1.12.0`, and asking for one
+  # fails with `manifest unknown`. `sha-5ec0336` is the same image and matches
+  # the commit in `tempo -V`.
+  # digest: sha256:3e8d5b185d1a1639eb400bd98efad0124d7651e5b38a61fe08bc4600616952f5
+  image: ghcr.io/tempoxyz/tempo:1.12.0
 
   # Private validator network — consensus P2P and internal RPC/WS.
   validator_network:

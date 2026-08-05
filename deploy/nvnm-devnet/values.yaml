@@ -19,10 +19,10 @@ chain:
   # chain `nvnm-dryrun-1` in this same cluster.
   network: nvnm-tempo-devnet-1
 
-  # DECISION D-A — EVM chain ID. UNSET ON PURPOSE.
-  # Taken in this sandbox already: 262144 (nvnm-dryrun-1), 7888 (mantra-canary-net-1).
-  # Upstream Tempo uses 42431 (Moderato testnet) — do not reuse.
-  evmChainId: ""
+  # DECISION D-A — RESOLVED  (chain team).
+  # Avoids the sandbox collisions: 262144 (nvnm-dryrun-1), 7888 (mantra-canary-net-1),
+  # and upstream Tempo's 42431 (Moderato testnet).
+  evmChainId: "787222"
 
   # Genesis JSON produced offline by `tempo-xtask generate-genesis`.
   genesisConfigMap: nvnm-genesis
@@ -30,10 +30,22 @@ chain:
 # ---------------------------------------------------------------------------
 # Image
 # ---------------------------------------------------------------------------
-# DECISION D-C — no NVNM Tempo-fork image exists yet.
+# DECISION D-C — use the UPSTREAM Tempo release image for the internal devnet.
+# Chain development team requirement: stay on published release binaries rather
+# than building from source.
+# -> https://github.com/tempoxyz/tempo/releases/tag/v1.12.0
+#
+# v1.12.0 is REQUIRED for T9, which we enable at genesis (see `hardforks` below).
+# v1.11.0 does not implement T9 and will diverge.
+#
+# Swap to the NVNM fork image once it exists; nothing else in the chart changes.
+# TAG HAS NO `v` PREFIX. GHCR publishes 1.12.0 / 1.12 / sha-5ec0336 / latest /
+# edge. `v1.12.0` does not exist and fails with `manifest unknown`.
+# Digest for 1.12.0 (== sha-5ec0336, the commit in `tempo -V`):
+#   sha256:3e8d5b185d1a1639eb400bd98efad0124d7651e5b38a61fe08bc4600616952f5
 image:
-  repository: ghcr.io/nvnm-chain/nvnm-node
-  tag: ""            # must be an immutable tag or digest — never `latest`
+  repository: ghcr.io/tempoxyz/tempo
+  tag: "1.12.0"      # immutable tag — never `latest`
   pullPolicy: IfNotPresent
   pullSecrets:
     - name: ghcr-io-secret
@@ -58,8 +70,21 @@ ports:
 # ---------------------------------------------------------------------------
 consensus:
   targetBlockTime: "500ms"
-  waitForProposal: "1200ms"      # >= targetBlockTime * 2
-  waitForNotarizations: "1000ms" # >= targetBlockTime * 1.5
+
+  # DELIBERATELY EMPTY — omitted so upstream defaults apply.
+  #
+  # Simplex validates at startup and PANICS if
+  #     wait-for-proposal (leader) > wait-for-notarizations (certification)
+  # at consensus/src/simplex/config.rs:173. The panic fires after the DKG
+  # ceremony begins, so it presents as a consensus fault, not a bad flag.
+  #
+  # Upstream defaults are consistent by construction. The wait-for-notarizations
+  # default is computed rather than a literal, so it cannot be recovered by
+  # inspecting the binary — capture it with `tempo node --help` before setting
+  # these, and preserve waitForProposal <= waitForNotarizations, which
+  # nvnm.validateRequired enforces whenever both are non-empty.
+  waitForProposal: ""
+  waitForNotarizations: ""
   # Tempo's same-region default. The 2*P95 rule gives ~10ms at <=5ms RTT, but
   # we keep 50ms as headroom for GKE pod-network jitter. Tighten only against
   # measured P95 from the running cluster.
@@ -69,6 +94,23 @@ consensus:
   messageBacklog: 16384
   allowPrivateIps: true          # pod IPs are RFC1918
   bypassIpCheck: false           # MUST stay false
+
+# ---------------------------------------------------------------------------
+# Hardforks — genesis activation (DECISION D-G)
+# ---------------------------------------------------------------------------
+# Chain development team requirement: enable through T9, which is expected on
+# mainnet shortly; hold T10 back so it can serve as the first post-launch
+# hardfork exercise.
+#
+# These are NOT node flags — they are `tempo-xtask generate-genesis` arguments,
+# baked into genesis.json at ceremony time. Recorded here so the chart and the
+# genesis stay documented together. See docs/nvnm/04-runbook.md §2.1.
+#
+# T0..T9   -> 0 (active at genesis, the xtask default)
+# T10      -> far future (inactive; reserved as the first post-launch upgrade)
+hardforks:
+  enabledThrough: T9
+  t10Time: 18446744073709551615   # u64::MAX
 
 # ---------------------------------------------------------------------------
 # Key custody — GCP KMS envelope decrypted into tmpfs
@@ -94,16 +136,86 @@ keyCustody:
 # emitted by the genesis ceremony — see docs/nvnm/04-runbook.md §2.
 # Leave empty ONLY for a deliberate block-path-only smoke test. Nothing warns
 # you: the chart renders fine, blocks flow, and transactions are never mined.
+# QUOTED and one-per-line deliberately. Order is load-bearing — position N is
+# validator-N / internal-N — and in a flow sequence you cannot see which 128-char
+# blob is which index without counting commas. Quoting costs nothing and removes
+# any chance of YAML coercing an all-digit or float-shaped ID to a number.
+#
+# All six verified against an independent secp256k1
+# derivation (coincurve), not just the runbook's openssl pipeline.
+#
+# These are PUBLIC keys — safe in git. The corresponding `.key` files are the
+# private halves and live only in Secret Manager, KMS-wrapped.
 enodes:
-  validator: []   # one per validator, ordered by index
-  internal: []    # one per internal RPC replica, ordered by ordinal
+  # one per validator, ordered by index — must match validator.external.hosts
+  validator:
+    - "d330d42535f416c685f71ea35946d88fd27c182e3aaec41cc5d13349f0ec49aa925744508cb63fc955682459de1103534b3a565b6b5566baf8451de13f09fcae" # validator-0 @ 192.168.15.11
+    - "6283caeb04c348e37d85ecd1e170abd5a93587ddf2a79af6e258a7a0783bddf54d53e11670a81c29fea51706f88590ea66aa6658d11699946966cb27fe9e932b" # validator-1 @ 192.168.15.12
+    - "cecaafa31853ce77753cb209f6d5a50d8a6bfd11a0660207c9d0bb414d46a3f6ae185e38a286ed60b3b929e5ca99f55f41aa6c1c89dfbb0d39b29baff2efcd2f" # validator-2 @ 192.168.15.13
+    - "36c3422aa44aee014f97c90f6cb9ef9e9793b72fbaa2561b4a94cf3daa93fa04bfd037edc5e01a14a26317be3c84dca96f19c110ae1065622c5717bc988b6806" # validator-3 @ 192.168.15.14
+  # one per internal RPC replica, ordered by StatefulSet ordinal
+  internal:
+    - "921768d7183fcfbdf18edff359cef148e307c06ddf7ffe7f62244111788b823505afd3fc2c41881343c4f87a85a925f0fc9be13bd2a2767f785c399fc794eaee" # rpc-internal-0
+    - "6deba23016d64e7bc0d1abd4e3ea603611348b60d0cedf754ffe80e5d9ff6cafa25fb0ed557c450944b92c3bfc3bd764d34227b551374c7ed6b8260ec66a540d" # rpc-internal-1
+  # NOTE: there is deliberately no `public` list. Nothing peers *with* the public
+  # tier, so its enode IDs are never pinned by anyone — but the nodes still need
+  # their own enode KEYS in Secret Manager (04-runbook.md §2.3 generates 8 keys,
+  # §2.4 uploads all 8; only these 6 IDs are ever referenced here).
 
 # ---------------------------------------------------------------------------
 # Validators — one StatefulSet per identity, replicas: 1, NO HA by design.
 # N=4 => f=1 Byzantine fault tolerated, quorum 2f+1 = 3.
 # ---------------------------------------------------------------------------
 validator:
+  # DECISION D-H — RESOLVED . DEFAULT OFF.
+  #
+  # Validators run on GCE VMs with reserved static internal IPs, NOT in GKE.
+  # Provisioned by infrasec-governance-gcp/.../vm-nvnm-chain, configured by
+  # chain-nvnm-ansible. This chart deploys the two RPC tiers only.
+  #
+  # WHY. Tempo's ValidatorConfigV2 records each validator's IP:port in genesis
+  # and strictly enforces it against the address the node DIALS OUT FROM. A
+  # validator on an unregistered IP is excluded from consensus while still
+  # syncing blocks and looking healthy on eth_blockNumber.
+  #
+  #   scripts/iptest-validator-ip-binding.sh — node3 was
+  #   moved to a bogus IP, its self-proposal counter went to 0, the other three
+  #   carried the chain, and its execution devp2p stayed healthy at 3 peers.
+  #
+  # No GKE mechanism gives a Pod a stable EGRESS IP:
+  #   static ILB        ingress only; pods still egress from a dynamic pod IP
+  # Cilium egress gw  CiliumEgressGatewayPolicy absent on this cluster, and
+  #                     would not apply to intra-cluster pod-to-pod traffic
+  # Spiderpool        its own cloud docs require enableStatefulSet=false
+  # Kube-OVN          requires replacing the CNI; unsupported on GKE
+  # KubeIP v2         static PUBLIC node IPs only
+  # GKEIPRoute        CRD present, but needs NET_ADMIN to put the address on
+  #                     the pod NIC (blocked on the Autopilot-managed pool) and
+  #                     documents nothing about egress source IP. Untested.
+  #
+  # SETTING THIS TRUE gives you an all-GKE chain that will look healthy and
+  # never reach consensus, unless you also set consensus.bypassIpCheck: true —
+  # which throws away the protection entirely. Only useful for a throwaway
+  # single-node smoke test. For a runnable local four-validator topology use
+  # examples/three-tier.yaml instead.
+  enabled: false
+
   count: 4
+
+  # Where the real validators live. Consumed even when enabled: false — the
+  # internal RPC tier follows and peers with these addresses.
+  #
+  # MUST match, in order:
+  #   - VALIDATOR_IPS in vm-nvnm-chain/asia-east2/nvnm-tempo-devnet-1/_addresses
+  #   - the --validators list used in the genesis ceremony
+  # A mismatch is invisible until transactions stop being mined.
+  external:
+    hosts:
+      - 192.168.15.11   # validator-0, asia-east2-a
+      - 192.168.15.12   # validator-1, asia-east2-b
+      - 192.168.15.13   # validator-2, asia-east2-c
+      - 192.168.15.14   # validator-3, asia-east2-a
+
   updateStrategy: OnDelete      # lockstep upgrades — GAP-8
   computeClass: nvnm-validator-class
   resources:
@@ -167,11 +279,33 @@ rpc:
 # Ingress (Emissary) — public tier only.
 # ---------------------------------------------------------------------------
 ingress:
-  enabled: false                # needs DNS zone + wildcard cert first (GAP-10)
+  # Still false: the DNS records and the cert do not exist yet (GAP-10).
+  #
+  # `mantra-chain-sandbox` has NO public Cloud DNS zone
+  # — only the three private GKE zones. So `mantrachain.dev` is not managed in
+  # this project, and creating these records is a **Cloudflare** change, not a
+  # Terragrunt one. That also matches the design intent: the public tier is
+  # Cloudflare-fronted, so Cloudflare holds the records and the edge cert.
+  enabled: false
   hostnames:
-    rpc: rpc.nvnm-devnet.mantrachain.dev
-    ws: ws.nvnm-devnet.mantrachain.dev
-  tlsSecret: nvnm-devnet-wildcard-tls
+    # DECISION. `nvnm.canary` slots under the existing
+    # canary naming (cf. mantra-canary-net-1) and leaves room for
+    # nvnm.testnet.* / nvnm.mantrachain.dev later without renaming this one.
+    rpc: rpc.nvnm.canary.mantrachain.dev
+    ws: ws.nvnm.canary.mantrachain.dev
+  # Wildcard *.nvnm.canary.mantrachain.dev, issued by cert-manager into the
+  # emissary namespace and referenced from there — see
+  # infra-argocd-gke-mantra-sandbox/.../argocd-app-cert-tls.
+  #
+  # NOTE: a DNS wildcard matches exactly ONE label. *.canary.mantrachain.dev
+  # does NOT cover rpc.nvnm.canary.mantrachain.dev, which is why this chain has
+  # its own certificate rather than reusing the cluster one.
+  # The SAN *.nvnm.canary.mantrachain.dev is carried on the CLUSTER wildcard
+  # Certificate, so the secret is the cluster one — not an nvnm-specific secret.
+  # cert-manager issues it into the `ingress` namespace and reflector copies it
+  # to `emissary`, which is where Emissary reads it from.
+  tlsSecret: asia-east2-std.canary.mantrachain.dev-wildcard-tls-secret
+  tlsSecretNamespace: emissary
   timeoutMs: 60000
 
 # ---------------------------------------------------------------------------

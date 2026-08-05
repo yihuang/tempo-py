@@ -136,10 +136,11 @@ spec:
 # Validators accept:
 #   consensus P2P  <- validators only
 #   execution p2p  <- validators + internal RPC tier   (transaction path)
-#   WS             <- internal RPC tier only           (block follow path)
+# WS             <- internal RPC tier only           (block follow path)
 #   metrics        <- gmp-system
 # Nothing else in the cluster can reach a validator.
 # ---------------------------------------------------------------------------
+{{- if .Values.validator.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -178,6 +179,7 @@ spec:
       ports:
         - {protocol: TCP, port: {{ .Values.ports.consensusMetrics }}}
         - {protocol: TCP, port: {{ .Values.ports.executionMetrics }}}
+{{- end }}
 {{- end }}
 {{- if and .Values.networkPolicy.enabled .Values.rpc.tiers.public.enabled }}
 ---
@@ -257,6 +259,10 @@ spec:
     authority: none
   tlsSecret:
     name: {{ .Values.ingress.tlsSecret }}
+    {{- with .Values.ingress.tlsSecretNamespace }}
+    # Referenced cross-namespace so the chain namespace needs no reflector copy.
+    namespace: {{ . }}
+    {{- end }}
   requestPolicy:
     insecure:
       action: Redirect
@@ -298,6 +304,10 @@ spec:
     authority: none
   tlsSecret:
     name: {{ .Values.ingress.tlsSecret }}
+    {{- with .Values.ingress.tlsSecretNamespace }}
+    # Referenced cross-namespace so the chain namespace needs no reflector copy.
+    namespace: {{ . }}
+    {{- end }}
 ---
 apiVersion: getambassador.io/v3alpha1
 kind: Mapping

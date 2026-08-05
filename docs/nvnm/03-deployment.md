@@ -6,21 +6,37 @@ Target: `mantra-chain-sandbox-asia-east2-std`, namespace `nvnm-tempo-devnet-1`.
 
 ## 1. Object inventory
 
-Verified 2026-08-01 with helm v3.16.3 and kubeconform v0.8.0
-(`-strict`, 24 schema-checked resources, **0 invalid**).
+Verified with helm v3.16.3 and kubeconform v0.6.7
+(`-strict`, `-kubernetes-version 1.35.0`): **15 resources, 11 schema-checked,
+0 invalid, 4 skipped** (ExternalSecret + PodMonitoring are CRDs).
+
+**This chart no longer deploys validators.** They are GCE VMs (D-H), so the
+release dropped from 32 objects to 15. `validator.enabled` defaults to `false`
+and the validator templates are retained only as documentation and as an
+all-GKE smoke-test path.
 
 | Kind | Count | Notes |
 |---|---|---|
-| StatefulSet | 6 | 4 validators (1 replica each) + rpc-internal (2) + rpc-public (2) |
-| Service | 8 | 4 validator headless + ClusterIP & headless per RPC tier |
-| ExternalSecret | 6 | 4 validator + 1 per RPC tier (per-ordinal keys inside) |
-| PodDisruptionBudget | 6 | one per validator + one per RPC tier |
+| StatefulSet | 2 | rpc-internal (2 replicas) + rpc-public (2 replicas) |
+| Service | 4 | ClusterIP & headless per RPC tier |
+| ExternalSecret | 2 | one per RPC tier (per-ordinal keys inside) |
+| PodDisruptionBudget | 2 | one per RPC tier |
 | PodMonitoring | 2 | consensus (:8001) + execution (:9001), all roles |
-| NetworkPolicy | 3 | validator ingress + internal-tier ingress + public-tier egress |
+| NetworkPolicy | 2 | internal-tier ingress + public-tier egress |
 | ServiceAccount | 1 | `nvnm-node`, WI direct principal on KMS |
-| **Subtotal (chart defaults)** | **32** | `ingress.enabled: false` |
+| **Subtotal (chart defaults)** | **15** | `ingress.enabled: false`, `validator.enabled: false` |
 | Host / Mapping | 2 / 2 | Emissary — only with `--set ingress.enabled=true` |
-| **Total with ingress** | **36** | |
+| **Total with ingress** | **19** | |
+
+Outside the chart, on GCE:
+
+| Resource | Count | Where |
+|---|---|---|
+| Reserved static internal IP | 4 | `vm-nvnm-chain/asia-east2/nvnm-tempo-devnet-1/_addresses` |
+| Instance template (non-spot) | 1 | `vm-nvnm-chain/_instance-template/validator` |
+| Compute instance | 4 | `vm-nvnm-chain/asia-east2/nvnm-tempo-devnet-1/validator-{0..3}` |
+| Service account | 1 | `vm-nvnm-chain/_instance-sa/default` |
+| Firewall rule | 2 | `allow-nvnm-chain-p2p`, `allow-nvnm-validator-ws-from-gke` |
 
 Tiers are independently gateable: `--set rpc.tiers.public.enabled=false` drops
 that tier's StatefulSet, both Services, ExternalSecret and PDB. Setting both RPC
@@ -34,16 +50,16 @@ Cluster-scoped, **not** in the chart:
 
 ## 2. Why a Helm chart and not cosmos-operator
 
-`[EMPIRICAL]` Every existing chain in this cluster is a `CosmosFullNode` CRD.
+Every existing chain in this cluster is a `CosmosFullNode` CRD.
 That operator drives a CometBFT binary: `26656` P2P, `priv_validator_key.json`,
 `config.toml`/`app.toml`, height-keyed `chain.versions` upgrade ladders, Horcrux
 threshold signing over a CometBFT-specific gRPC protocol.
 
-`[EMPIRICAL]` NVNM/Tempo shares none of that: single reth+Commonware process,
+NVNM/Tempo shares none of that: single reth+Commonware process,
 ports 8000/8001/8545/8546/9001, ed25519 + BLS12-381 threshold share, CLI-only
 consensus config, `NoopEngineApiBuilder`.
 
-`[INFERRED]` Extending cosmos-operator to model a Tempo node would mean forking
+Extending cosmos-operator to model a Tempo node would mean forking
 a second operator and maintaining it — strictly worse than a ~1,100-line Helm chart
 for 8 pods. The chart deliberately **reuses the platform primitives** the operator
 also uses (`premium-rwo-xfs`, ESO + `ClusterSecretStore/gcp-secrets-manager`, GMP
@@ -91,10 +107,10 @@ needing the downward API.
 
 ### 3.2 `updateStrategy: OnDelete` on validators
 
-`[EMPIRICAL]` "all custom chain participants must run the same build"; precompile
+"all custom chain participants must run the same build"; precompile
 and consensus changes activate at a fork height across the whole fleet.
 
-`[INFERRED]` `RollingUpdate` would let Helm/ArgoCD restart validators
+`RollingUpdate` would let Helm/ArgoCD restart validators
 automatically and asynchronously, producing a transient mixed-version set. With
 `OnDelete`, applying a new image tag changes the StatefulSet spec but touches
 **nothing** until an operator deletes each pod deliberately, in the order the
@@ -114,13 +130,13 @@ Error: image.tag is unset (DECISION D-C). Pin an immutable tag or digest —
 never `latest`. A mixed-version validator set can fork the chain.
 ```
 
-`[INFERRED]` A `latest` tag on a consensus binary is a chain-fork hazard, not a
+A `latest` tag on a consensus binary is a chain-fork hazard, not a
 style issue: two validators pulling `latest` at different times run different
 code. The guard makes that unrepresentable.
 
 ### 3.4 PDB `minAvailable: 1` on a 1-replica StatefulSet
 
-`[INFERRED]` This blocks **all** voluntary eviction of that validator — node
+This blocks **all** voluntary eviction of that validator — node
 drains, autoscaler consolidation, and GKE maintenance will all refuse. That is
 the intent (GAP-7: DKG resharing needs every validator online at the epoch
 boundary). Operators bypass it deliberately per the runbook, which is the correct
@@ -135,10 +151,10 @@ Validators accept:
 - tcp/30303 from validators and `rpc` tier=`internal` only (devp2p tx path)
 - tcp/8001, tcp/9001 from `gmp-system` (metrics)
 
-Everything else is denied. `[EMPIRICAL]` The cluster runs Dataplane V2
+Everything else is denied. The cluster runs Dataplane V2
 (`datapath_provider = ADVANCED_DATAPATH`), so NetworkPolicy is enforced natively.
 
-> `[EMPIRICAL]` Terragrunt sets `network_policy = false` on this cluster. With
+> Terragrunt sets `network_policy = false` on this cluster. With
 > Dataplane V2 that flag disables the legacy Calico add-on, not NetworkPolicy
 > enforcement — Dataplane V2 enforces `networking.k8s.io/v1` NetworkPolicy
 > regardless. **Verify this empirically** before relying on it (see
@@ -170,7 +186,7 @@ a read-only root filesystem.
 | 7 | Namespace + `ghcr-io-secret` ExternalSecret | InfraSec | GitOps |
 | 8 | *(ingress only)* DNS zone + wildcard cert + reflector allow-list | InfraSec | [terragrunt-stubs.md](../../deploy/nvnm-devnet/platform/terragrunt-stubs.md) §4 |
 
-`[INFERRED]` Items 1–3 are chain-team blockers. Items 4–5 are InfraSec work that
+Items 1–3 are chain-team blockers. Items 4–5 are InfraSec work that
 can start today in parallel. Item 6 needs both.
 
 ---
@@ -187,7 +203,7 @@ flowchart TD
     F["6 · helm template --dry-run=server<br/>review rendered manifests"] --> G
     G{"Approval<br/>gate"}
     G -->|approved| H["7 · Validators only<br/>both rpc tiers enabled=false"]
-    H --> I["8 · Verify block production<br/>tempo_consensus_finalizations_total"]
+    H --> I["8 · Verify block production<br/>consensus_engine_marshal_finalized_height<br/>+ ..._proposed_by_self_total per validator"]
     I --> J{"Blocks<br/>advancing?"}
     J -->|no| K["Debug: consensus timing,<br/>DKG, peer connectivity"]
     K --> I
@@ -202,7 +218,7 @@ flowchart TD
     R --> S["14 · Wire alerts → OpsGenie"]
 ```
 
-**Tiers come up bottom-up** — `[INFERRED]` an RPC node cannot start without a
+**Tiers come up bottom-up** — an RPC node cannot start without a
 reachable upstream WS endpoint, so validators must be producing before the
 internal tier starts, and the internal tier must be serving before the public
 tier starts.
@@ -216,7 +232,7 @@ every health check still green. Do not call the deploy done before a receipt.
 
 ## 6. GitOps integration
 
-`[EMPIRICAL]` The platform uses ApplicationSets with a
+The platform uses ApplicationSets with a
 `matrix{clusters, git.directories}` generator plus a `kustomize-env-plugin` CMP.
 Chain apps live at `sandbox/clusters/blockchain/<clusterName>/` and are a second
 app-of-apps hop.
@@ -259,7 +275,7 @@ spec:
   revisionHistoryLimit: 10
 ```
 
-> `[EMPIRICAL]` `mantra-chain-blockchain` AppProject currently allows
+> `mantra-chain-blockchain` AppProject currently allows
 > `sourceRepos: [infra-argocd-gke-mantra.git, chain-relayer]`. No change needed
 > if the chart is vendored into the GitOps repo. If the chart stays in `tempo-py`,
 > add that repo to `sourceRepos`.
@@ -271,7 +287,7 @@ Two options for where the chart lives:
 | Vendor chart into `infra-argocd-gke-mantra` | Matches existing convention; no AppProject change; single repo to review | Chart drifts from `tempo-py` source of truth |
 | Keep in `tempo-py`, add to `sourceRepos` | Single source of truth; chart lives with the SDK/devnet tooling | AppProject change; two repos in a deploy review |
 
-**Recommendation:** vendor it. `[INFERRED]` The GitOps repo is already the audited
+**Recommendation:** vendor it. The GitOps repo is already the audited
 surface for anything that reaches a cluster, and splitting that surface for one
 chart is not worth the review complexity.
 
@@ -291,8 +307,20 @@ billing — sandbox may have committed-use or sustained-use discounts applied.
 | Cloud Logging / Monitoring ingest | — | — | — | ~$50 |
 | **Total** | | | | **≈ $2,176/mo** |
 
+> **Cost figure is STALE — recalculate before quoting it.** It was
+> computed with validators as GKE pods on the spot pool. They are now four
+> non-spot `e2-highmem-8` VMs with 200GB pd-ssd each, which is the dominant line
+> item and roughly 3-4x the spot equivalent. The RPC-tier numbers still hold.
+> Recompute with:
+> ```bash
+> gcloud compute machine-types describe e2-highmem-8 \
+>   --zone asia-east2-a --project mantra-chain-sandbox \
+>   --format='value(guestCpus,memoryMb)'
+> ```
+> and the current on-demand `asia-east2` rate — do not reuse the spot price.
+
 The third tier costs **~$230/mo** over a two-tier design (2 spot nodes + 2 PVCs).
-`[INFERRED]` That is a small price for removing every network path between an
+That is a small price for removing every network path between an
 internet-facing node and a validator; if cost pressure is severe, drop
 `rpc.tiers.public.count` to 1 before considering collapsing the tier.
 
@@ -302,7 +330,7 @@ Sources: [gcloud-compute.com/asia-east2](https://gcloud-compute.com/asia-east2.h
 ### The spot question
 
 Running the 4 validators on-demand costs **~$1,170/mo more** than all-spot
-(4 × $369.33 = $1,477 vs 4 × $76.50 = $306). `[INFERRED]` That is the price of
+(4 × $369.33 = $1,477 vs 4 × $76.50 = $306). That is the price of
 consensus liveness and it is not optional — GAP-3 explains why: correlated
 preemption of 2 of 4 validators drops below the `2f+1 = 3` quorum and halts the
 chain.
@@ -322,14 +350,15 @@ Legitimate levers if cost pressure is real:
 
 | Scenario | Action | RTO |
 |---|---|---|
-| Bad image tag | Revert `image.tag`, `kubectl delete pod` per validator in runbook order | ~10 min |
+| Bad image tag (RPC tiers) | Revert `image.tag`, `helm upgrade` | ~5 min |
+| Bad binary (validators) | Revert `binary_tag` + `tempo_sha256`, `ansible-playbook playbooks/upgrade-binary.yml` (`serial: 1`) | ~20 min |
 | Bad consensus tuning | Revert `values.yaml`, same restart procedure | ~10 min |
 | Corrupt execution state (1 node) | Delete PVC, restart — node backfills from peers | hours (backfill is 8 blocks/s) |
 | Corrupt consensus state (1 node) | `rm -rf /data/consensus` — node re-derives from last finalized block | ~15 min |
 | Chain halt (< quorum) | Restore validators to ≥ `2f+1`; chain resumes | ~15 min |
 | Total loss | Re-run genesis ceremony — devnet has no value to preserve | ~1 day |
 
-`[EMPIRICAL]` "A validator that loses state can recover by replaying blocks from
-genesis from a peer"; `[EMPIRICAL]` "Never delete the data directory and re-sync
+"A validator that loses state can recover by replaying blocks from
+genesis from a peer"; "Never delete the data directory and re-sync
 with the same signing key — this risks double-signing." Deleting only the
 `consensus` subdirectory is explicitly safe.

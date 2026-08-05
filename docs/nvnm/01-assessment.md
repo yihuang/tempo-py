@@ -5,7 +5,7 @@ Assessment of `mantra-chain-sandbox` readiness to host an NVNM Chain L1
 
 **Method:** read-only inspection of `infrasec-governance-gcp` (Terragrunt),
 `infra-argocd-gke-mantra` (GitOps), `g-mantra/NVNMChain` (design), plus live
-read-only GCP API queries on 2026-08-01.
+read-only GCP API queries on .
 
 ---
 
@@ -13,7 +13,7 @@ read-only GCP API queries on 2026-08-01.
 
 ### 1.1 GCP projects
 
-`[EMPIRICAL]` `infrasec-governance-gcp/mantra-finance-root-organisation/`
+`infrasec-governance-gcp/mantra-finance-root-organisation/`
 
 | Project | ID | Folder | Role |
 |---|---|---|---|
@@ -24,9 +24,9 @@ read-only GCP API queries on 2026-08-01.
 Org `557668086402`, billing `01104D-E5595D-D5E6B6`. Terraform state in
 `terraform-state-gcp-mantra-common-sec-production` (GCS), prefix == directory path.
 
-### 1.2 GKE clusters (live, verified 2026-08-01)
+### 1.2 GKE clusters (live,
 
-`[EMPIRICAL]` `gcloud container clusters list --project mantra-chain-sandbox`
+`gcloud container clusters list --project mantra-chain-sandbox`
 
 | Cluster | Region | Type | Master version | Master CIDR | Nodes |
 |---|---|---|---|---|---|
@@ -42,7 +42,7 @@ Org `557668086402`, billing `01104D-E5595D-D5E6B6`. Terraform state in
 
 ### 1.3 Node pools (live)
 
-`[EMPIRICAL]` `gcloud container node-pools list --cluster mantra-chain-sandbox-asia-east2-std`
+`gcloud container node-pools list --cluster mantra-chain-sandbox-asia-east2-std`
 
 | Pool | Machine | Disk | Spot | Zones | Autoscaling |
 |---|---|---|---|---|---|
@@ -51,13 +51,13 @@ Org `557668086402`, billing `01104D-E5595D-D5E6B6`. Terraform state in
 
 `e2-highmem-8` = 8 vCPU / 64 GiB.
 
-> `[EMPIRICAL]` **Terraform drift:** Terragrunt declares `min_count = 0, max_count = 0`
+> **Terraform drift:** Terragrunt declares `min_count = 0, max_count = 0`
 > for `default-node-pool`; live shows `maxNodeCount: 5` plus an autoprovisioned NAP
 > pool that is not in Terraform at all. Reconcile before relying on IaC here.
 
 ### 1.4 Network
 
-`[EMPIRICAL]` `common/vpc/sandbox/mantra-common-vpc-sandbox/mantra-chain-sandbox-vpc-1/`
+`common/vpc/sandbox/mantra-common-vpc-sandbox/mantra-chain-sandbox-vpc-1/`
 
 Shared VPC `mantra-chain-sandbox-vpc-1`, `routing_mode = GLOBAL`, MTU 1460.
 
@@ -82,7 +82,7 @@ No subnet flow logs on any subnet.
 
 ### 1.5 Platform components (GitOps)
 
-`[EMPIRICAL]` `infra-argocd-gke-mantra` @ `develop`
+`infra-argocd-gke-mantra` @ `develop`
 
 | Component | Version | Namespace | Notes |
 |---|---|---|---|
@@ -114,7 +114,7 @@ ComputeClasses (`cloud.google.com/v1`):
 
 ### 1.6 Observability
 
-`[EMPIRICAL]` **Google Managed Prometheus**, not prometheus-operator.
+**Google Managed Prometheus**, not prometheus-operator.
 Scraping via `monitoring.googleapis.com/v1 PodMonitoring`. Logs by label
 `gke.logging.enabled: "true"` → Cloud Logging → sink to
 `mantra-common-monitor-sandbox`. Alerts via `_custom/terraform-gcp-alerts/gke-logs`
@@ -124,7 +124,7 @@ No self-hosted Prometheus/Grafana/Loki in the sandbox clusters.
 
 ### 1.7 Key custody (existing Horcrux pattern)
 
-`[EMPIRICAL]` KMS keyring `mantra-chain-sandbox-global` (location `global`), live keys:
+KMS keyring `mantra-chain-sandbox-global` (location `global`), live keys:
 
 ```
 horcrux-sharded-key-mantra-canary-net-1
@@ -155,8 +155,8 @@ The pattern that matters (`horcrux-validators/signer-base/statefulset.yaml`):
 
 ### GAP-1 — cosmos-operator / Horcrux are structurally unusable `[CRITICAL]`
 
-`[EMPIRICAL]` Every chain in sandbox is a `cosmos.strange.love/v1 CosmosFullNode`
-CRD driving a CometBFT binary. `[EMPIRICAL]` NVNM/Tempo is a **single reth+Commonware
+Every chain in sandbox is a `cosmos.strange.love/v1 CosmosFullNode`
+CRD driving a CometBFT binary. NVNM/Tempo is a **single reth+Commonware
 process** with `NoopEngineApiBuilder` (no external Engine API), ed25519 + BLS keys,
 and ports 8000/8001/8545/8546/9001/30303 — not 26656/26657/1317/9090.
 
@@ -169,29 +169,50 @@ PodMonitoring, Emissary Host/Mapping, `premium-rwo-xfs`) but not the CRDs.
 
 ### GAP-2 — no validator HA is possible `[CRITICAL, by design]`
 
-`[EMPIRICAL]` NVNMChain `docs/architecture/deploy.md`: the BLS `signing.share`
+NVNMChain `docs/architecture/deploy.md`: the BLS `signing.share`
 "must be distributed out-of-band per validator; **never shared between validators**".
-`[EMPIRICAL]` Threshold sigs are non-attributable — "a quorum can forge any member's
+Threshold sigs are non-attributable — "a quorum can forge any member's
 partial".
 
-`[INFERRED]` Therefore: no active/passive pair, no `replicas: 2`, no multi-pod
+Therefore: no active/passive pair, no `replicas: 2`, no multi-pod
 failover for a single validator identity. Two pods holding the same share is a
 correctness hazard, not a redundancy win. Availability must come from **validator
 count** (`3f+1` → 4 validators tolerate 1 fault).
 
-**Mitigation:** `replicas: 1` per validator StatefulSet, one StatefulSet per
-validator identity, `podAntiAffinity` across nodes, and accept that a validator
-restart is a `1/4` liveness dip (safe, non-halting).
+**Mitigation:** one host per validator identity, one process per host, and accept
+that a validator restart is a `1/4` liveness dip (safe, non-halting). Realised as
+four separate GCE VMs (D-H), each its own Terragrunt unit so restarts are
+individually gated, with `serial: 1` in Ansible enforcing one-at-a-time.
 
 ### GAP-3 — spot nodes will preempt validators `[CRITICAL]`
 
-`[EMPIRICAL]` Both live node pools are `spot: true`; the `default` ComputeClass
-lists spot as first priority. `[EMPIRICAL]` GCP Spot VMs are preemptible with 30 s
+Both live node pools are `spot: true`; the `default` ComputeClass
+lists spot as first priority. GCP Spot VMs are preemptible with 30 s
 notice.
 
-`[INFERRED]` Preemption of 2 of 4 validators simultaneously (plausible — same zone,
+Preemption of 2 of 4 validators simultaneously (plausible — same zone,
 same machine family, correlated preemption) drops the network below the `2f+1 = 3`
 quorum and **halts block production**.
+
+**Status: MITIGATED by moving off GKE entirely.** Validators are GCE
+VMs from a dedicated instance template with `spot = false` **hardcoded, not
+env-conditional** — deliberately unlike `vm-mantra-chain/_instance-template/default`,
+which sets `spot = ENVIRONMENT == "sandbox" ? true : false`. That ternary is
+correct for a Cosmos fullnode and wrong for a Tempo validator.
+
+The severity was understated here: the cluster's only
+node pool is `nap-e2-highmem-8-spot-p5hd0w03` (`gke-provisioning=spot`,
+`autopilot-managed-node=true`), so spot was not merely *available* — it was where
+validators would have landed by default, with no ComputeClass to stop them.
+
+Verify:
+
+```bash
+gcloud compute instances list --project mantra-chain-sandbox \
+  --filter='labels.nodetype=validator AND labels.chain_id=nvnm-tempo-devnet-1' \
+  --format='table(name,scheduling.preemptible)'
+# expect: preemptible=False on all four
+```
 
 **Mitigation:** new ComputeClass `nvnm-validator-class`, on-demand only, with a
 taint + toleration so nothing else lands on it. Detailed in
@@ -199,7 +220,7 @@ taint + toleration so nothing else lands on it. Detailed in
 
 ### GAP-4 — firewall does not permit Tempo chain P2P `[HIGH]`
 
-`[EMPIRICAL]` The only P2P rule is `tcp:26656` (CometBFT). NVNM needs **two**
+The only P2P rule is `tcp:26656` (CometBFT). NVNM needs **two**
 ports, and they carry different things:
 
 | Port | Purpose | Consequence if blocked |
@@ -218,10 +239,10 @@ Terragrunt unit. Stub provided in [terragrunt-stubs.md](../../deploy/nvnm-devnet
 
 ### GAP-5 — GKE control-plane CIDR pool is exhausted `[MEDIUM]`
 
-`[EMPIRICAL]` `gke-control-plane-cidrs` allocates from `172.31.224.0/25` with
+`gke-control-plane-cidrs` allocates from `172.31.224.0/25` with
 `new_bits = 3` → exactly 8 × /28, and all 8 keys are consumed.
 
-`[INFERRED]` Allocation is **positional** — inserting a key mid-list renumbers
+Allocation is **positional** — inserting a key mid-list renumbers
 every downstream cluster's `master_ipv4_cidr_block`, which is a destructive change
 requiring cluster recreation.
 
@@ -230,7 +251,7 @@ requiring cluster recreation.
 
 ### GAP-6 — consensus flags cannot live in a ConfigMap `[MEDIUM]`
 
-`[EMPIRICAL]` NVNMChain `docs/architecture/deploy.md`: "Tempo-specific `--consensus.*`
+NVNMChain `docs/architecture/deploy.md`: "Tempo-specific `--consensus.*`
 flags have **no config file** and **no environment variable** equivalents beyond
 `TEMPO_FOLLOW` and `TEMPO_BOOTNODES_ENDPOINT`. They must be passed as **CLI arguments**."
 
@@ -239,9 +260,9 @@ ConfigMap reload. Helm `values.yaml` → `args` templating is the only clean pat
 
 ### GAP-7 — DKG requires all validators online at epoch boundary `[MEDIUM]`
 
-`[EMPIRICAL]` `docs/architecture/commonware-reth-glue.md` §1.5: resharing "Requires
+`docs/architecture/commonware-reth-glue.md` §1.5: resharing "Requires
 **all validators online** during a short synchrony window at the boundary."
-`[EMPIRICAL]` The ceremony runs over 3–5 views (~1–25 s) and does not halt block
+The ceremony runs over 3–5 views (~1–25 s) and does not halt block
 production.
 
 **Impact:** rolling node upgrades, GKE maintenance windows, and ComputeClass
@@ -256,8 +277,8 @@ ComputeClass, and an epoch-aware upgrade runbook
 
 ### GAP-8 — upgrades must be lockstep, not rolling `[MEDIUM]`
 
-`[EMPIRICAL]` `docs/research/reth-sdk.md`: "all custom chain participants must run
-the same build". `[EMPIRICAL]` precompiles compile into the binary; changing one
+`docs/research/reth-sdk.md`: "all custom chain participants must run
+the same build". precompiles compile into the binary; changing one
 means "shipping a new binary to every validator and activating at a fork height".
 
 **Impact:** `RollingUpdate` with `maxUnavailable: 1` is the wrong strategy for a
@@ -266,14 +287,14 @@ consensus-affecting change — a mixed-version validator set can fork. Use
 
 ### GAP-9 — naming collision with existing NVNM Cosmos chain `[MEDIUM]`
 
-`[EMPIRICAL]` A chain called **`nvnm-dryrun-1` already exists** in this sandbox:
+A chain called **`nvnm-dryrun-1` already exists** in this sandbox:
 
 - Image `ghcr.io/nvnm-chain/nvnmchain:v1.1.0`, binary `nvnmchaind` — **Cosmos SDK**
 - `evm-chain-id = 262144`
 - Namespace `nvnm-dryrun-1`, KMS key `horcrux-sharded-key-nvnm-dryrun-1`
 - Two sentries, currently `replicas: 0`
 
-`[EMPIRICAL]` `mantra-canary-net-1` uses `evm-chain-id = 7888`.
+`mantra-canary-net-1` uses `evm-chain-id = 7888`.
 
 **Impact:** the Tempo-fork L1 is a **different chain** from the Cosmos NVNM chain
 and must not reuse the name, namespace, or EVM chain ID. Proposed:
@@ -281,9 +302,9 @@ namespace/network `nvnm-tempo-devnet-1`, EVM chain ID **TBD (decision D-A)**.
 
 ### GAP-10 — no NVNM DNS zone or TLS cert `[LOW]`
 
-`[EMPIRICAL]` The `letsencrypt-dns01` ClusterIssuer solver lists `canary.*`,
+The `letsencrypt-dns01` ClusterIssuer solver lists `canary.*`,
 `dryrun.*`, `evm-canary.*` zones under `mantrachain.dev`. **No `nvnm` zone.**
-`[EMPIRICAL]` `nvnm-dryrun-1` has no `host_mapping.yaml` at all — the existing NVNM
+`nvnm-dryrun-1` has no `host_mapping.yaml` at all — the existing NVNM
 chain has never had public ingress.
 
 **Mitigation:** add the zone to the solver + a wildcard `Certificate`. Trivial,
@@ -291,11 +312,11 @@ but must be done before ingress works.
 
 ### GAP-11 — storage class may under-serve a real archive node `[LOW for devnet]`
 
-`[EMPIRICAL]` Tempo requires "NVMe SSD, 1 TiB+"; growth ~20 GiB/day execution +
+Tempo requires "NVMe SSD, 1 TiB+"; growth ~20 GiB/day execution +
 ~2 GiB/day consensus at 0.5 s blocks; archive ~15 TiB/yr.
-`[EMPIRICAL]` `premium-rwo-xfs` is `pd-ssd`, not local NVMe or Hyperdisk Extreme.
+`premium-rwo-xfs` is `pd-ssd`, not local NVMe or Hyperdisk Extreme.
 
-`[INFERRED]` For an internal testnet with near-zero tx volume, actual growth will
+For an internal testnet with near-zero tx volume, actual growth will
 be far below the mainnet figure and `pd-ssd` is adequate. For mainnet, evaluate
 `hyperdisk-extreme` or local SSD.
 
@@ -304,8 +325,8 @@ resize. Do not size for the mainnet figure on a devnet.
 
 ### GAP-12 — no NVNM Tempo-fork container image exists `[BLOCKING for deploy]`
 
-`[EMPIRICAL]` No image found in `ghcr.io/nvnm-chain/` or `ghcr.io/mantra-chain/`
-for a Tempo fork. `[EMPIRICAL]` NVNMChain repo is design-only — no `Dockerfile`,
+No image found in `ghcr.io/nvnm-chain/` or `ghcr.io/mantra-chain/`
+for a Tempo fork. NVNMChain repo is design-only — no `Dockerfile`,
 no CI publishing a node image.
 
 **Impact:** the deployment cannot run until the chain team publishes a forked

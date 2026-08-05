@@ -70,7 +70,7 @@ auto-created rules), but add it now so the multi-region path is not blocked late
 }
 ```
 
-`[EMPIRICAL]` Port 8000 = `--consensus.listen-address`, per NVNMChain
+Port 8000 = `--consensus.listen-address`, per NVNMChain
 `docs/architecture/deploy.md`. Port 30303 = reth's default execution devp2p
 (`--port` / `--discovery.port`), matching the `enode://…@10.0.0.1:30303`
 bootnode example in the same doc.
@@ -123,7 +123,7 @@ All values are **KMS ciphertext**, never plaintext.
 Add to the `letsencrypt-dns01` solver `dnsZones`:
 
 ```yaml
-- nvnm-devnet.mantrachain.dev
+- nvnm.canary.mantrachain.dev
 ```
 
 Plus a wildcard `Certificate` in
