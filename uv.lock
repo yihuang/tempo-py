@@ -1275,6 +1275,7 @@ dependencies = [
     { name = "eth-account" },
     { name = "eth-contract" },
     { name = "eth-utils" },
+    { name = "pycryptodome" },
     { name = "rlp" },
     { name = "web3" },
 ]
@@ -1300,6 +1301,7 @@ requires-dist = [
     { name = "eth-account", specifier = ">=0.13.0" },
     { name = "eth-contract", specifier = ">=0.4.1" },
     { name = "eth-utils", specifier = ">=5.2.0" },
+    { name = "pycryptodome", specifier = ">=3.23.0" },
     { name = "fire", marker = "extra == 'devnet'", specifier = ">=0.7.0" },
     { name = "jsonmerge", marker = "extra == 'devnet'", specifier = ">=1.9.0" },
     { name = "pyyaml", marker = "extra == 'devnet'", specifier = ">=6.0" },

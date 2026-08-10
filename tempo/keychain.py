@@ -14,6 +14,7 @@ from eth_utils import keccak
 
 from .contracts.tip20 import TIP20
 from .models import Signature, TempoTransaction
+from .p256 import P256Signature, P256Signer, WebAuthnSignature
 from .signer import Signer
 from .transaction import get_sign_payload
 from .types import (
@@ -36,7 +37,11 @@ INNER_SIGNATURE_LENGTH = 65
 """Byte length of the inner secp256k1 signature (r || s || v)."""
 
 KEYCHAIN_SIGNATURE_LENGTH = 1 + 20 + INNER_SIGNATURE_LENGTH
-"""Total byte length of a Keychain V2 signature: type(1) || address(20) || inner(65)."""
+"""Byte length of a secp256k1 Keychain V2 signature: type(1) || address(20) || inner(65).
+
+P-256 and WebAuthn inners are longer, and WebAuthn's is variable, so this is not a bound
+on every keychain blob -- only the length the secp256k1 form always has.
+"""
 
 _INNER_OFFSET = KEYCHAIN_SIGNATURE_LENGTH - INNER_SIGNATURE_LENGTH  # 21
 
@@ -417,19 +422,21 @@ class KeyAuthorization:
 
 @attrs.define(frozen=True)
 class KeychainSignature:
-    """86-byte Keychain V2 signature.
+    """Keychain V2 signature: an access key signing on behalf of a root account.
 
-    Layout (86 bytes)::
+    Layout::
 
-        [0:1]    type byte (0x04 = Keychain V2)
-        [1:21]   root account address (20 bytes)
-        [21:86]  inner secp256k1 signature (r || s || v)
+        [0:1]   type byte (0x04 = Keychain V2)
+        [1:21]  root account address (20 bytes)
+        [21:]   inner signature -- any primitive envelope
 
-    The access key signs ``keccak256(0x04 || sig_hash || root_account)``; the
-    ``0x04`` domain separator prevents cross-scheme signature confusion.
+    The inner signature is secp256k1 (65 bytes, no type prefix), P-256, or WebAuthn, so
+    the blob is 86 bytes for secp256k1 and longer and variable for the others. The access
+    key signs ``keccak256(0x04 || sig_hash || root_account)``; the ``0x04`` domain
+    separator prevents cross-scheme signature confusion.
 
     Attributes:
-        raw: Full 86-byte keychain signature blob.
+        raw: Full keychain signature blob.
 
     For more info (Keychain V2 signature):
     https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/primitives/src/transaction/tt_signature.rs#L514
@@ -438,25 +445,25 @@ class KeychainSignature:
     raw: bytes = attrs.field(converter=as_bytes)
 
     def __attrs_post_init__(self) -> None:
-        if len(self.raw) != KEYCHAIN_SIGNATURE_LENGTH:
-            raise ValueError(f"KeychainSignature must be {KEYCHAIN_SIGNATURE_LENGTH} bytes, got {len(self.raw)}")
+        if len(self.raw) <= _INNER_OFFSET:
+            raise ValueError(f"KeychainSignature must carry an inner signature, got {len(self.raw)} bytes")
         if self.raw[0] != KEYCHAIN_SIGNATURE_TYPE:
             raise ValueError(f"expected Keychain V2 type byte {KEYCHAIN_SIGNATURE_TYPE:#04x}, got {self.raw[0]:#04x}")
 
     @classmethod
     def from_inner(
         cls,
-        inner_sig: Signature,
+        inner_sig: Signature | P256Signature | WebAuthnSignature,
         user_address: BytesLike,
     ) -> KeychainSignature:
         """Build from the access key's inner signature and the root account address.
 
-        The inner signature is embedded with canonical v in {27, 28} so the
-        serialized transaction matches the node's re-encoded canonical bytes
-        (and therefore its tx hash).
+        A secp256k1 inner is embedded with canonical v in {27, 28} so the serialized
+        transaction matches the node's re-encoded canonical bytes (and therefore its tx
+        hash); P-256 and WebAuthn inners carry their own type byte and go in as-is.
         """
-        raw = bytes([KEYCHAIN_SIGNATURE_TYPE]) + bytes(as_address(user_address)) + inner_sig.to_canonical_bytes()
-        return cls(raw=raw)
+        inner = inner_sig.to_canonical_bytes() if isinstance(inner_sig, Signature) else inner_sig.to_bytes()
+        return cls(raw=bytes([KEYCHAIN_SIGNATURE_TYPE]) + bytes(as_address(user_address)) + inner)
 
     @classmethod
     def signing_hash(cls, sig_hash: bytes, user_address: BytesLike) -> bytes:
@@ -471,12 +478,24 @@ class KeychainSignature:
         return Address(self.raw[1:_INNER_OFFSET])
 
     @property
+    def inner_bytes(self) -> bytes:
+        """The access key's signature envelope, whatever scheme it uses."""
+        return self.raw[_INNER_OFFSET:]
+
+    @property
     def inner_signature(self) -> Signature:
-        """The 65-byte inner secp256k1 signature from the access key."""
-        return Signature.from_bytes(self.raw[_INNER_OFFSET:KEYCHAIN_SIGNATURE_LENGTH])
+        """The inner secp256k1 signature.
+
+        Raises:
+            ValueError: If the access key signed with P-256 or WebAuthn instead; read
+                `inner_bytes` for those.
+        """
+        if len(self.raw) != KEYCHAIN_SIGNATURE_LENGTH:
+            raise ValueError(f"inner signature is not secp256k1 ({len(self.inner_bytes)} bytes); use inner_bytes")
+        return Signature.from_bytes(self.inner_bytes)
 
     def to_bytes(self) -> bytes:
-        """Return the 86-byte blob (used as the transaction's sender signature)."""
+        """Return the blob (used as the transaction's sender signature)."""
         return self.raw
 
 
@@ -520,7 +539,7 @@ def sign_tx_access_key(
         access_key_sk: Hex-encoded private key of the access key (secp256k1).
         root_account: The root ``Signer`` that grants the authorization.
         chain_id: Chain ID (defaults to ``tx.chain_id``).
-        key_type: Type of the access key (only SECP256K1 is supported).
+        key_type: Type of the access key (inline authorization is SECP256K1-only).
         key_id: Access key address (defaults to signing key's address).
         expiry: Unix timestamp for expiry (0 = never; non-admin only).
         limits: Per-token spending limits (``None`` = unlimited, ``()`` =
@@ -537,7 +556,10 @@ def sign_tx_access_key(
     https://github.com/tempoxyz/tempo/blob/d0b4ca4/crates/revm/src/handler.rs#L1823
     """
     if key_type != SignatureType.SECP256K1:
-        raise ValueError(f"only SECP256K1 access keys are supported, got {SignatureType(key_type).name}")
+        # Inline provisioning only: the authorization and the transaction must be signed
+        # by the same scheme, and this helper takes a secp256k1 key. A P-256 or WebAuthn
+        # key already on the keychain signs through `sign_tx_registered_key`.
+        raise ValueError(f"inline key authorization is SECP256K1-only, got {SignatureType(key_type).name}")
 
     access_key = Signer(access_key_sk)
     actual_chain_id = chain_id if chain_id is not None else tx.chain_id
@@ -567,5 +589,46 @@ def sign_tx_access_key(
 
     return tx_with_auth._replace_fields(
         sender_signature=KeychainSignature.from_inner(inner_sig, root_addr),
+        sender_address=root_addr,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sign transaction with an already-registered key
+# ---------------------------------------------------------------------------
+
+
+def sign_tx_registered_key(
+    tx: TempoTransaction,
+    access_key: Signer | P256Signer,
+    root_account: BytesLike,
+    *,
+    webauthn: bool = False,
+    **sign_kwargs: object,
+) -> TempoTransaction:
+    """Sign ``tx`` as ``root_account`` with a key already authorized on its keychain.
+
+    A bare Keychain V2 signature with no inline authorization: the node resolves the key
+    from the account's stored keychain, so only the root's address is needed, not its
+    private key. The key's scheme must match the ``SignatureType`` it was registered
+    under -- a `P256Signer` for a P-256 key, plus ``webauthn`` for a passkey.
+
+    Args:
+        tx: The transaction to sign.
+        access_key: The authorized key, secp256k1 or P-256.
+        root_account: Address of the account the key acts for.
+        webauthn: Sign as a passkey assertion rather than a bare P-256 signature.
+        **sign_kwargs: Forwarded to the signer (``pre_hash``, or ``rp_id`` for WebAuthn).
+    """
+    root_addr = as_address(root_account)
+    signing_hash = KeychainSignature.signing_hash(get_sign_payload(tx), root_addr)
+    if not webauthn:
+        inner = access_key.sign(signing_hash, **sign_kwargs)
+    elif isinstance(access_key, P256Signer):
+        inner = access_key.sign_webauthn(signing_hash, **sign_kwargs)
+    else:
+        raise TypeError("a WebAuthn signature needs a P256Signer")
+    return tx._replace_fields(
+        sender_signature=KeychainSignature.from_inner(inner, root_addr),
         sender_address=root_addr,
     )

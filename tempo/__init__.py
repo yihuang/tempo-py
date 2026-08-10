@@ -9,6 +9,7 @@ Core modules:
 - ``tempo.types`` — ``Address``, ``Hash32``, type coercion helpers
 - ``tempo.constants`` — chain IDs, RPC URLs, token/precompile addresses
 - ``tempo.signer`` — ``Signer``, ``recover_address``, ``verify_signature``
+- ``tempo.p256`` — ``P256Signer``, P-256 / WebAuthn signature envelopes
 - ``tempo.transaction`` — RLP serialization, signing helpers, ``Builder``
 - ``tempo.keychain`` — access key models (``KeyRestrictions``, ``KeyAuthorization``, ``CallScope``)
 - ``tempo.contracts`` — ``Contract.from_abi()`` instances + typed call builders
@@ -31,6 +32,7 @@ from .models import (
     Signature,
     TempoTransaction,
 )
+from .p256 import P256Signature, P256Signer, WebAuthnSignature, derive_address
 from .signer import Signer, recover_address, verify_signature
 from .transaction import (
     Builder,
@@ -82,6 +84,11 @@ __all__ = [
     "Signer",
     "recover_address",
     "verify_signature",
+    # P-256 / WebAuthn
+    "P256Signer",
+    "P256Signature",
+    "WebAuthnSignature",
+    "derive_address",
     # Transaction
     "Builder",
     "serialize",
