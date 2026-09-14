@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import jsonmerge
+import pytest
 import tomlkit
 import yaml
 
@@ -293,6 +294,50 @@ class TestDevnetConfig:
         assert "100" in args
         assert "--t6-time" in args
         assert "200" in args
+
+    def test_hardfork_any_shaped_key_is_schedulable(self) -> None:
+        """A lettered point release and a fork this release predates take the same path.
+
+        Nothing here enumerates forks, so ``t14`` needs no config change to be schedulable —
+        the genesis generator stays the authority on which ones actually exist.
+        """
+        cfg = DevnetConfig({"t1a_time": 100, "t10_time": 300, "t14_time": 500})
+        assert (cfg.t1a_time, cfg.t10_time, cfg.t14_time) == (100, 300, 500)
+
+        args = cfg.to_genesis_args()
+        for flag, value in [("--t1a-time", "100"), ("--t10-time", "300"), ("--t14-time", "500")]:
+            assert args[args.index(flag) + 1] == value
+
+        # Scheduled forks survive a YAML round-trip, unscheduled ones stay out of it and read
+        # back as active-at-genesis, whether or not this release has heard of them.
+        d = cfg.to_dict()
+        assert "t2_time" not in d
+        assert DevnetConfig(d).t14_time == 500
+        assert (cfg.t0_time, cfg.t13_time) == (0, 0)
+
+        with pytest.raises(AttributeError):
+            _ = cfg.not_a_fork
+
+    def test_hardfork_ordering_is_by_activation_not_lexicographic(self) -> None:
+        """``t2`` before ``t10``, ``t1`` before ``t1a`` — so emitted args read in fork order."""
+        cfg = DevnetConfig({"t10_time": 4, "t2_time": 2, "t1a_time": 1, "t1_time": 1, "t9_time": 3})
+        args = cfg.to_genesis_args()
+        flags = [a for a in args if a.startswith("--t")]
+        assert flags == ["--t1-time", "--t1a-time", "--t2-time", "--t9-time", "--t10-time"]
+        emitted = [k for k in cfg.to_dict() if k.endswith("_time")]
+        assert emitted == ["t1_time", "t1a_time", "t2_time", "t9_time", "t10_time"]
+
+    def test_hardfork_malformed_key_is_rejected(self) -> None:
+        """A near-miss key used to be dropped in silence, launching the fork at genesis."""
+        for bad in ["t1A_time", "T9_time", "t_9_time"]:
+            with pytest.raises(ValueError, match="not a valid hardfork key"):
+                DevnetConfig({bad: 100})
+
+        with pytest.raises(TypeError, match="must be an int"):
+            DevnetConfig({"t9_time": "100"})
+
+        # An unrelated setting that merely ends in `_time` is not a near-miss.
+        DevnetConfig({"tempo_time": 100})
 
     # ------------------------------------------------------------------
     # Two-network topology tests
