@@ -296,6 +296,17 @@ patch_node_flags:
   - "32"
 ```
 
+### patch_genesis_flags
+
+Extra CLI flags appended to the backend's genesis command:
+
+```yaml
+patch_genesis_flags:
+  - "--deployment-gas-token"
+  - "--deployment-gas-token-admin"
+  - "0x..."
+```
+
 ## Requirements
 
 The ``tempo`` and ``tempo-xtask`` binaries must be on PATH:

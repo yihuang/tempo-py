@@ -44,6 +44,14 @@ DOCKER_PUBLIC_IP_HOST_OCTET_BASE = 10
 HARDFORK_ATTRS = [f"t{i}_time" for i in range(9)]
 
 
+def _flags(data: dict[str, Any], key: str) -> list[str]:
+    """``data[key]``: CLI arguments passed on verbatim, one per entry."""
+    flags = data.get(key) or []
+    if not isinstance(flags, list) or any(not isinstance(x, str) for x in flags):
+        raise TypeError(f"{key} must be a list of strings")
+    return flags
+
+
 class ValidatorConfig:
     """Configuration for a single validator node.
 
@@ -205,10 +213,8 @@ class DevnetConfig:
             raise TypeError("patch_reth must be a mapping (dict)")
         self.patch_reth: dict[str, Any] = patch_reth
 
-        patch_node_flags = data.get("patch_node_flags") or []
-        if not isinstance(patch_node_flags, list) or any(not isinstance(x, str) for x in patch_node_flags):
-            raise TypeError("patch_node_flags must be a list of strings")
-        self.patch_node_flags: list[str] = patch_node_flags
+        self.patch_node_flags: list[str] = _flags(data, "patch_node_flags")
+        self.patch_genesis_flags: list[str] = _flags(data, "patch_genesis_flags")
 
         # Docker settings + topology
         docker_raw = data.get("docker") or {}
@@ -379,7 +385,7 @@ class DevnetConfig:
             val = getattr(self, hf)
             if val != 0:
                 args.extend([f"--{hf.replace('_', '-')}", str(val)])
-        return args
+        return [*args, *self.patch_genesis_flags]
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize config to a dict for YAML output."""
@@ -411,6 +417,8 @@ class DevnetConfig:
             d["patch_reth"] = self.patch_reth
         if self.patch_node_flags:
             d["patch_node_flags"] = self.patch_node_flags
+        if self.patch_genesis_flags:
+            d["patch_genesis_flags"] = self.patch_genesis_flags
         if self.docker_is_two_network:
             docker_dict: dict[str, Any] = {
                 "image": self.docker_image,

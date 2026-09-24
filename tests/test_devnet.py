@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 import jsonmerge
+import pytest
 import tomlkit
 import yaml
 
@@ -208,6 +209,16 @@ class TestDevnetConfig:
         assert "--seed" in args
         assert "42" in args
         assert "127.0.0.1:8000" in args
+
+    def test_patch_genesis_flags_are_appended_and_roundtrip(self) -> None:
+        flags = ["--deployment-gas-token", "--deployment-gas-token-admin", "0x" + "11" * 20]
+        cfg = DevnetConfig({"patch_genesis_flags": flags, "validators": [{"host": "127.0.0.1", "port": 8000}]})
+        assert cfg.to_genesis_args()[-3:] == flags
+        assert DevnetConfig(cfg.to_dict()).patch_genesis_flags == flags
+
+    def test_patch_genesis_flags_must_be_strings(self) -> None:
+        with pytest.raises(TypeError, match="patch_genesis_flags"):
+            DevnetConfig({"patch_genesis_flags": ["--flag", 1], "validators": [{"host": "127.0.0.1", "port": 8000}]})
 
     def test_load_yaml(self) -> None:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -1300,12 +1311,14 @@ class TestBackends:
                     {"host": "127.0.0.1", "port": 8000, "moniker": "node0"},
                     {"host": "127.0.0.1", "port": 8010, "moniker": "node1"},
                 ],
+                "patch_genesis_flags": ["--extra", "1"],
             }
         )
         args = get_backend(cfg).localnet_args(cfg, Path("/data"))
         assert args[0] == "allegro-xtask"
         assert args[1] == "genesis"
         assert "127.0.0.1:8000,127.0.0.1:8010" == args[args.index("--validators") + 1]
+        assert args[-2:] == ["--extra", "1"]
 
     def test_allegro_node_args(self) -> None:
         cfg = DevnetConfig(

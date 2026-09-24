@@ -188,3 +188,9 @@ validators:
 #   - "32"
 #   - "--txpool.aa-valid-after-max-secs"
 #   - "600"
+
+# Extra CLI flags appended to the backend's genesis command
+# patch_genesis_flags:
+#   - "--deployment-gas-token"
+#   - "--deployment-gas-token-admin"
+#   - "0x..."
