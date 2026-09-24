@@ -49,6 +49,9 @@ seed: 42
 # Disable minting pairwise FeeAMM liquidity
 # no_pairwise_liquidity: false
 
+# Issue a temporary gas token from this address for genesis accounts to pay fees in
+# deployment_gas_token_admin: "0x..."
+
 # Path to the tempo binary (default: "tempo")
 # tempo_bin: tempo
 

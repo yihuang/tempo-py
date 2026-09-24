@@ -189,6 +189,8 @@ class DevnetConfig:
         self.no_dkg_in_genesis: bool = data.get("no_dkg_in_genesis", False)
         self.no_extra_tokens: bool = data.get("no_extra_tokens", False)
         self.no_pairwise_liquidity: bool = data.get("no_pairwise_liquidity", False)
+        # Issues xtask's temporary gas token, which genesis accounts pay fees in.
+        self.deployment_gas_token_admin: str | None = data.get("deployment_gas_token_admin")
 
         # Hardfork timestamps (default 0 = active at genesis)
         for hf in HARDFORK_ATTRS:
@@ -375,6 +377,8 @@ class DevnetConfig:
             args.append("--no-extra-tokens")
         if self.no_pairwise_liquidity:
             args.append("--no-pairwise-liquidity")
+        if self.deployment_gas_token_admin:
+            args.extend(["--deployment-gas-token", "--deployment-gas-token-admin", self.deployment_gas_token_admin])
         for hf in HARDFORK_ATTRS:
             val = getattr(self, hf)
             if val != 0:
@@ -401,6 +405,8 @@ class DevnetConfig:
             d["no_extra_tokens"] = True
         if self.no_pairwise_liquidity:
             d["no_pairwise_liquidity"] = True
+        if self.deployment_gas_token_admin:
+            d["deployment_gas_token_admin"] = self.deployment_gas_token_admin
         for hf in HARDFORK_ATTRS:
             val = getattr(self, hf)
             if val != 0:

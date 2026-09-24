@@ -208,6 +208,15 @@ class TestDevnetConfig:
         assert "--seed" in args
         assert "42" in args
         assert "127.0.0.1:8000" in args
+        assert "--deployment-gas-token" not in args
+
+    def test_to_genesis_args_deployment_gas_token(self) -> None:
+        admin = "0x" + "11" * 20
+        cfg = DevnetConfig({"deployment_gas_token_admin": admin, "validators": [{"host": "127.0.0.1", "port": 8000}]})
+        args = cfg.to_genesis_args()
+        assert "--deployment-gas-token" in args
+        assert args[args.index("--deployment-gas-token-admin") + 1] == admin
+        assert DevnetConfig(cfg.to_dict()).deployment_gas_token_admin == admin
 
     def test_load_yaml(self) -> None:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
