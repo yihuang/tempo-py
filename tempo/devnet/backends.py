@@ -199,6 +199,7 @@ class AllegroBackend:
             str(config.chain_id),
             "--validators",
             validators_arg or config.validators_arg,
+            *config.patch_genesis_flags,
         ]
 
     def prepare_layout(self, config: DevnetConfig, data_dir: Path, *, docker: bool = False) -> None:
